@@ -15,12 +15,12 @@ fn secp256k1_build() {
         //.define("SECP256K1_API", Some(""))
         .define("ENABLE_MODULE_ECDH", Some("1"))
         .define("ENABLE_MODULE_SCHNORRSIG", Some("1"))
-        .define("ENABLE_MODULE_EXTRAKEYS", Some("1"))
-        //.define("ENABLE_MODULE_ELLSWIFT", Some("0"))
-        // upstream sometimes introduces calls to printf, which we cannot compile
-        // with WASM due to its lack of libc. printf is never necessary and we can
-        // just #define it away.
-        .define("printf(...)", Some(""));
+        .define("ENABLE_MODULE_EXTRAKEYS", Some("1"));
+    //.define("ENABLE_MODULE_ELLSWIFT", Some("1"))
+    // upstream sometimes introduces calls to printf, which we cannot compile
+    // with WASM due to its lack of libc. printf is never necessary and we can
+    // just #define it away.
+    //.define("printf(...)", Some(""));
 
     //if cfg!(feature = "lowmemory") {
     //    base_config.define("ECMULT_WINDOW_SIZE", Some("4")); // A low-enough value to consume negligible memory

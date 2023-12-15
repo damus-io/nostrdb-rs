@@ -6,7 +6,7 @@ readme = "README.md"
 version = "0.1.0"
 edition = "2021"
 build = "build.rs"
-include = ["../deps", "src", "Cargo.toml", "build.rs", "../*.c", "../*.h"]
+license = "GPL-3.0-or-later"
 
 [build-dependencies]
 cc = "1.0"

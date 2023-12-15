@@ -1,3 +1,4 @@
 .direnv/
+/nostrdb
 Cargo.lock
 target/
