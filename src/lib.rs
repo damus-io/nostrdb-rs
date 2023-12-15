@@ -4,7 +4,11 @@
 #[allow(unused)]
 mod bindings;
 
-mod config;
-mod error;
-mod ndb;
-mod result;
+pub mod config;
+pub mod error;
+pub mod ndb;
+pub mod note;
+pub mod result;
+pub mod transaction;
+
+mod test_util;

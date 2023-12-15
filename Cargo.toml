@@ -12,4 +12,9 @@ repository = "https://github.com/damus-io/nostrdb-rs/"
 
 [build-dependencies]
 cc = "1.0"
+
+[dependencies]
+env_logger = "0.10.1"
+libc = "0.2.151"
+log = "0.4.20"
 #bindgen = "0.69.1" // re-enable when we update bindings

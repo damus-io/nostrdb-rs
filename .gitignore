@@ -2,3 +2,5 @@
 /nostrdb
 Cargo.lock
 target/
+.build-result
+.buildcmd

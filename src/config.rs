@@ -1,12 +1,10 @@
 use crate::bindings;
 
-// The Rust wrapper for ndb_config
-pub struct NdbConfig {
+pub struct Config {
     pub config: bindings::ndb_config,
 }
 
-impl NdbConfig {
-    // Constructor
+impl Config {
     pub fn new() -> Self {
         let mut config = bindings::ndb_config {
             filter_context: std::ptr::null_mut(),
@@ -20,10 +18,10 @@ impl NdbConfig {
             bindings::ndb_default_config(&mut config);
         }
 
-        NdbConfig { config }
+        Config { config }
     }
 
-    // Example setter methods
+    //
     pub fn set_flags(&mut self, flags: i32) -> &mut Self {
         self.config.flags = flags;
         self
