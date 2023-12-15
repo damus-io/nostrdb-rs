@@ -3,11 +3,15 @@ use crate::transaction::Transaction;
 
 #[derive(Debug)]
 pub enum Note<'a> {
+    /// A note in-memory outside of nostrdb
     Owned {
         ptr: *mut bindings::ndb_note,
         size: usize,
     },
 
+    /// A note inside of nostrdb. Tied to the lifetime of a
+    /// [Transaction] to ensure no reading of data outside
+    /// of a transaction. Construct these with [Note::new_transactional].
     Transactional {
         ptr: *mut bindings::ndb_note,
         size: usize,
@@ -21,7 +25,8 @@ impl<'a> Note<'a> {
         Note::Owned { ptr, size }
     }
 
-    // Create a new note tied to a transaction
+    /// Constructs a `Note` in a transactional context.
+    /// Use [Note::new_transactional] to create a new transactional note.
     pub fn new_transactional(
         ptr: *mut bindings::ndb_note,
         size: usize,
