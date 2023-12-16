@@ -3,7 +3,11 @@ use crate::transaction::Transaction;
 
 #[derive(Debug)]
 pub enum Note<'a> {
-    /// A note in-memory outside of nostrdb
+    /// A note in-memory outside of nostrdb. This note is a pointer to a note in
+    /// memory and will be free'd when [Drop]ped. Method such as [Note::from_json]
+    /// will create owned notes in memory.
+    ///
+    /// [Drop]: std::ops::Drop
     Owned {
         ptr: *mut bindings::ndb_note,
         size: usize,
@@ -11,7 +15,7 @@ pub enum Note<'a> {
 
     /// A note inside of nostrdb. Tied to the lifetime of a
     /// [Transaction] to ensure no reading of data outside
-    /// of a transaction. Construct these with [Note::new_transactional].
+    /// of a transaction.
     Transactional {
         ptr: *mut bindings::ndb_note,
         size: usize,
@@ -21,13 +25,21 @@ pub enum Note<'a> {
 }
 
 impl<'a> Note<'a> {
-    pub fn new_owned(ptr: *mut bindings::ndb_note, size: usize) -> Note<'static> {
+    /// Constructs an owned `Note`. This note is a pointer to a note in
+    /// memory and will be free'd when [Drop]ped. You normally wouldn't
+    /// use this method directly, public consumer would use from_json instead.
+    ///
+    /// [Drop]: std::ops::Drop
+    pub(crate) fn new_owned(ptr: *mut bindings::ndb_note, size: usize) -> Note<'static> {
         Note::Owned { ptr, size }
     }
 
     /// Constructs a `Note` in a transactional context.
     /// Use [Note::new_transactional] to create a new transactional note.
-    pub fn new_transactional(
+    /// You normally wouldn't use this method directly, it is used by
+    /// functions that get notes from the database like
+    /// [ndb_get_note_by_id]
+    pub(crate) fn new_transactional(
         ptr: *mut bindings::ndb_note,
         size: usize,
         key: u64,
@@ -80,10 +92,12 @@ mod tests {
         use crate::ndb::Ndb;
         use crate::test_util;
 
+        let db = "target/testdbs/note_query_works";
+
         // Initialize ndb
         {
             let cfg = Config::new();
-            let ndb = Ndb::new(".", &cfg).expect("db open");
+            let ndb = Ndb::new(&db, &cfg).expect("db open");
             let mut txn = Transaction::new(&ndb).expect("new txn");
 
             let err = ndb
@@ -92,6 +106,6 @@ mod tests {
             assert!(err == Error::NotFound);
         }
 
-        test_util::cleanup_db();
+        test_util::cleanup_db(db);
     }
 }

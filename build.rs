@@ -17,22 +17,6 @@ fn secp256k1_build() {
         .define("ENABLE_MODULE_SCHNORRSIG", Some("1"))
         .define("ENABLE_MODULE_EXTRAKEYS", Some("1"));
     //.define("ENABLE_MODULE_ELLSWIFT", Some("1"))
-    // upstream sometimes introduces calls to printf, which we cannot compile
-    // with WASM due to its lack of libc. printf is never necessary and we can
-    // just #define it away.
-    //.define("printf(...)", Some(""));
-
-    //if cfg!(feature = "lowmemory") {
-    //    base_config.define("ECMULT_WINDOW_SIZE", Some("4")); // A low-enough value to consume negligible memory
-    //    base_config.define("ECMULT_GEN_PREC_BITS", Some("2"));
-    //} else {
-    //    base_config.define("ECMULT_GEN_PREC_BITS", Some("4"));
-    //    base_config.define("ECMULT_WINDOW_SIZE", Some("15")); // This is the default in the configure file (`auto`)
-    //}
-
-    //base_config.define("USE_EXTERNAL_DEFAULT_CALLBACKS", Some("1"));
-    //#[cfg(feature = "recovery")]
-    //base_config.define("ENABLE_MODULE_RECOVERY", Some("1"));
 
     // WASM headers and size/align defines.
     if env::var("CARGO_CFG_TARGET_ARCH").unwrap() == "wasm32" {
@@ -78,10 +62,11 @@ fn main() {
         // Add other include paths
         //.flag("-Wall")
         .flag("-Wno-misleading-indentation")
-        .flag("-Wno-unused-function")
-        //.flag("-Werror")
-        //.flag("-g")
-        .compile("libnostrdb.a");
+        .flag("-Wno-unused-function");
+    //.flag("-Werror")
+    //.flag("-g")
+
+    build.compile("libnostrdb.a");
 
     secp256k1_build();
 

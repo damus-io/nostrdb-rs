@@ -3,5 +3,6 @@ pub enum Error {
     DbOpenFailed,
     NotFound,
     DecodeError,
+    NoteProcessFailed,
     TransactionFailed,
 }

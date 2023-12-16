@@ -2,7 +2,6 @@ use crate::bindings;
 use crate::error::Error;
 use crate::ndb::Ndb;
 use crate::result::Result;
-use log::debug;
 
 /// A `nostrdb` transaction. Only one is allowed to be active per thread.
 #[derive(Debug)]
@@ -64,22 +63,23 @@ mod tests {
 
     #[test]
     fn transaction_inheritence_fails() {
+        let db = "target/testdbs/txn_inheritence_fails";
         // Initialize ndb
         {
             let cfg = Config::new();
-            let ndb = Ndb::new(".", &cfg).expect("ndb open failed");
+            let ndb = Ndb::new(db, &cfg).expect("ndb open failed");
 
             {
-                let txn = Transaction::new(&ndb).expect("txn1 failed");
+                let _txn = Transaction::new(&ndb).expect("txn1 failed");
                 let txn2 = Transaction::new(&ndb).expect_err("tx2");
                 assert!(txn2 == Error::TransactionFailed);
             }
 
             {
-                let txn = Transaction::new(&ndb).expect("txn1 failed");
+                let _txn = Transaction::new(&ndb).expect("txn1 failed");
             }
         }
 
-        test_util::cleanup_db();
+        test_util::cleanup_db(db);
     }
 }
