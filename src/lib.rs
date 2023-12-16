@@ -11,4 +11,11 @@ pub mod note;
 pub mod result;
 pub mod transaction;
 
+pub use config::Config;
+pub use error::Error;
+pub use ndb::Ndb;
+pub use note::Note;
+pub use result::Result;
+pub use transaction::Transaction;
+
 mod test_util;
