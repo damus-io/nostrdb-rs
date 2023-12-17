@@ -2,9 +2,9 @@ use crate::ndb_profile::{root_as_ndb_profile_record_unchecked, NdbProfileRecord}
 use crate::Transaction;
 
 pub struct ProfileRecord<'a> {
-    record: NdbProfileRecord<'a>,
-    primary_key: u64,
-    transaction: &'a Transaction,
+    pub record: NdbProfileRecord<'a>,
+    pub primary_key: u64,
+    pub transaction: &'a Transaction,
 }
 
 impl<'a> ProfileRecord<'a> {
