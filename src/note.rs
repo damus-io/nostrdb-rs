@@ -67,6 +67,19 @@ impl<'a> Note<'a> {
         }
     }
 
+    fn content_size(&self) -> usize {
+        unsafe { bindings::ndb_note_content_length(self.as_ptr()) as usize }
+    }
+
+    /// Get the [`Note`] contents.
+    pub fn content(&self) -> &'a str {
+        unsafe {
+            let content = bindings::ndb_note_content(self.as_ptr());
+            let byte_slice = std::slice::from_raw_parts(content as *const u8, self.content_size());
+            std::str::from_utf8_unchecked(byte_slice)
+        }
+    }
+
     pub fn kind(&self) -> u32 {
         unsafe { bindings::ndb_note_kind(self.as_ptr()) }
     }
