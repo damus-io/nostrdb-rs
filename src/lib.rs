@@ -4,6 +4,12 @@
 #[allow(unused)]
 mod bindings;
 
+#[allow(unused)]
+#[allow(non_snake_case)]
+mod ndb_profile;
+
+pub type Profile<'a> = ndb_profile::NdbProfile<'a>;
+
 pub mod config;
 pub mod error;
 pub mod ndb;
