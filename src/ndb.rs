@@ -3,11 +3,7 @@ use std::ffi::CString;
 use std::ptr;
 
 use crate::bindings;
-use crate::config::Config;
-use crate::error::Error;
-use crate::note::Note;
-use crate::result::Result;
-use crate::transaction::Transaction;
+use crate::{Config, Error, Note, ProfileRecord, Result, Transaction};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -80,6 +76,37 @@ impl Ndb {
         }
 
         Ok(())
+    }
+
+    pub fn get_profile_by_pubkey<'a>(
+        &self,
+        transaction: &'a mut Transaction,
+        id: &[u8; 32],
+    ) -> Result<ProfileRecord<'a>> {
+        let mut len: usize = 0;
+        let mut primkey: u64 = 0;
+
+        let profile_record_ptr = unsafe {
+            bindings::ndb_get_profile_by_pubkey(
+                transaction.as_mut_ptr(),
+                id.as_ptr(),
+                &mut len,
+                &mut primkey,
+            )
+        };
+
+        if profile_record_ptr.is_null() {
+            // Handle null pointer (e.g., note not found or error occurred)
+            return Err(Error::NotFound);
+        }
+
+        // Convert the raw pointer to a Note instance
+        Ok(ProfileRecord::new(
+            profile_record_ptr,
+            len,
+            primkey,
+            transaction,
+        ))
     }
 
     /// Get a note from the database. Takes a [Transaction] and a 32-byte [Note] Id

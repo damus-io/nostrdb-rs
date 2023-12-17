@@ -8,19 +8,19 @@ mod bindings;
 #[allow(non_snake_case)]
 mod ndb_profile;
 
-pub type Profile<'a> = ndb_profile::NdbProfile<'a>;
-
-pub mod config;
-pub mod error;
-pub mod ndb;
-pub mod note;
-pub mod result;
-pub mod transaction;
+mod config;
+mod error;
+mod ndb;
+mod note;
+mod profile;
+mod result;
+mod transaction;
 
 pub use config::Config;
 pub use error::Error;
 pub use ndb::Ndb;
 pub use note::Note;
+pub use profile::ProfileRecord;
 pub use result::Result;
 pub use transaction::Transaction;
 
