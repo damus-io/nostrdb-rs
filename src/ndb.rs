@@ -10,10 +10,31 @@ use crate::result::Result;
 use crate::transaction::Transaction;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
+
+#[derive(Debug)]
+struct NdbRef {
+    ndb: *mut bindings::ndb,
+}
+
+/// It's safe to have multi-threaded references to this because thread safety
+/// is guaranteed by LMDB
+unsafe impl Send for NdbRef {}
+unsafe impl Sync for NdbRef {}
+
+/// The database is automatically closed when [Ndb] is [Drop]ped.
+impl Drop for NdbRef {
+    fn drop(&mut self) {
+        unsafe {
+            bindings::ndb_destroy(self.ndb);
+        }
+    }
+}
 
 /// A nostrdb context. Construct one of these with [Ndb::new].
+#[derive(Debug, Clone)]
 pub struct Ndb {
-    ndb: *mut bindings::ndb,
+    refs: Arc<NdbRef>,
 }
 
 impl Ndb {
@@ -37,7 +58,8 @@ impl Ndb {
             return Err(Error::DbOpenFailed);
         }
 
-        Ok(Ndb { ndb })
+        let refs = Arc::new(NdbRef { ndb });
+        Ok(Ndb { refs })
     }
 
     /// Ingest a relay-sent event in the form `["EVENT","subid", {"id:"...}]`
@@ -51,7 +73,7 @@ impl Ndb {
         // Get the length of the string
         let len = json.len() as libc::c_int;
 
-        let res = unsafe { bindings::ndb_process_event(self.ndb, c_json_ptr, len) };
+        let res = unsafe { bindings::ndb_process_event(self.as_ptr(), c_json_ptr, len) };
 
         if res == 0 {
             return Err(Error::NoteProcessFailed);
@@ -89,16 +111,7 @@ impl Ndb {
 
     /// Get the underlying pointer to the context in C
     pub fn as_ptr(&self) -> *mut bindings::ndb {
-        return self.ndb;
-    }
-}
-
-/// The database is automatically closed when [Ndb] is [Drop]ped.
-impl Drop for Ndb {
-    fn drop(&mut self) {
-        unsafe {
-            bindings::ndb_destroy(self.ndb);
-        }
+        return self.refs.ndb;
     }
 }
 
