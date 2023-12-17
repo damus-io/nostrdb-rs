@@ -65,7 +65,7 @@ impl Ndb {
     /// Ingest a relay-sent event in the form `["EVENT","subid", {"id:"...}]`
     /// This function returns immediately and doesn't provide any information on
     /// if ingestion was successful or not.
-    pub fn process_event(&mut self, json: &str) -> Result<()> {
+    pub fn process_event(&self, json: &str) -> Result<()> {
         // Convert the Rust string to a C-style string
         let c_json = CString::new(json).expect("CString::new failed");
         let c_json_ptr = c_json.as_ptr();
