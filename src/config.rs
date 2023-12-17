@@ -28,12 +28,12 @@ impl Config {
     }
 
     pub fn skip_validation(&mut self, skip: bool) -> &mut Self {
-        let NDB_FLAG_SKIP_NOTE_VERIFY: i32 = (1 << 1);
+        let skip_note_verify: i32 = 1 << 1;
 
         if skip {
-            self.config.flags |= NDB_FLAG_SKIP_NOTE_VERIFY
+            self.config.flags |= skip_note_verify;
         } else {
-            self.config.flags &= !NDB_FLAG_SKIP_NOTE_VERIFY
+            self.config.flags &= !skip_note_verify;
         }
 
         self
