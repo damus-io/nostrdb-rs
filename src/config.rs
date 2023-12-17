@@ -27,6 +27,18 @@ impl Config {
         self
     }
 
+    pub fn skip_validation(&mut self, skip: bool) -> &mut Self {
+        let NDB_FLAG_SKIP_NOTE_VERIFY: i32 = (1 << 1);
+
+        if skip {
+            self.config.flags |= NDB_FLAG_SKIP_NOTE_VERIFY
+        } else {
+            self.config.flags &= !NDB_FLAG_SKIP_NOTE_VERIFY
+        }
+
+        self
+    }
+
     pub fn set_ingester_threads(&mut self, threads: i32) -> &mut Self {
         self.config.ingester_threads = threads;
         self
