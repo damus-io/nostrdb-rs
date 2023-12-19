@@ -80,7 +80,7 @@ impl Ndb {
 
     pub fn get_profile_by_pubkey<'a>(
         &self,
-        transaction: &'a mut Transaction,
+        transaction: &'a Transaction,
         id: &[u8; 32],
     ) -> Result<ProfileRecord<'a>> {
         let mut len: usize = 0;
@@ -88,7 +88,7 @@ impl Ndb {
 
         let profile_record_ptr = unsafe {
             bindings::ndb_get_profile_by_pubkey(
-                transaction.as_mut_ptr(),
+                transaction.as_ptr() as *mut bindings::ndb_txn,
                 id.as_ptr(),
                 &mut len,
                 &mut primkey,
@@ -112,7 +112,7 @@ impl Ndb {
     /// Get a note from the database. Takes a [Transaction] and a 32-byte [Note] Id
     pub fn get_note_by_id<'a>(
         &self,
-        transaction: &'a mut Transaction,
+        transaction: &'a Transaction,
         id: &[u8; 32],
     ) -> Result<Note<'a>> {
         let mut len: usize = 0;
@@ -120,7 +120,7 @@ impl Ndb {
 
         let note_ptr = unsafe {
             bindings::ndb_get_note_by_id(
-                transaction.as_mut_ptr(),
+                transaction.as_ptr() as *mut bindings::ndb_txn,
                 id.as_ptr(),
                 &mut len,
                 &mut primkey,
