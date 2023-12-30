@@ -284,6 +284,19 @@ pub const SCNiPTR: &[u8; 3] = b"li\0";
 pub const SCNoPTR: &[u8; 3] = b"lo\0";
 pub const SCNuPTR: &[u8; 3] = b"lu\0";
 pub const SCNxPTR: &[u8; 3] = b"lx\0";
+pub const CCAN_COMPILER: &[u8; 3] = b"cc\0";
+pub const CCAN_CFLAGS : & [u8 ; 111] = b"-g3 -ggdb -Wall -Wundef -Wmissing-prototypes -Wmissing-declarations -Wstrict-prototypes -Wold-style-definition\0" ;
+pub const CCAN_OUTPUT_EXE_CFLAG: &[u8; 3] = b"-o\0";
+pub const HAVE_CCAN: u32 = 1;
+pub const HAVE_UNALIGNED_ACCESS: u32 = 1;
+pub const HAVE_TYPEOF: u32 = 1;
+pub const HAVE_BIG_ENDIAN: u32 = 0;
+pub const HAVE_BYTESWAP_H: u32 = 1;
+pub const HAVE_BSWAP_64: u32 = 1;
+pub const HAVE_LITTLE_ENDIAN: u32 = 1;
+pub const __bool_true_false_are_defined: u32 = 1;
+pub const true_: u32 = 1;
+pub const false_: u32 = 0;
 pub const _STDIO_H: u32 = 1;
 pub const _____fpos_t_defined: u32 = 1;
 pub const ____mbstate_t_defined: u32 = 1;
@@ -346,6 +359,9 @@ pub const NDB_FLAG_SKIP_NOTE_VERIFY: u32 = 2;
 pub const NDB_NUM_FILTERS: u32 = 7;
 pub const MAX_TEXT_SEARCH_RESULTS: u32 = 128;
 pub const MAX_TEXT_SEARCH_WORDS: u32 = 8;
+pub const NDB_NUM_BLOCK_TYPES: u32 = 6;
+pub const NDB_MAX_RELAYS: u32 = 24;
+pub const NOSTR_BECH32_KNOWN_TYPES: u32 = 7;
 pub type __u_char = ::std::os::raw::c_uchar;
 pub type __u_short = ::std::os::raw::c_ushort;
 pub type __u_int = ::std::os::raw::c_uint;
@@ -532,11 +548,6 @@ extern "C" {
         __base: ::std::os::raw::c_int,
     ) -> uintmax_t;
 }
-pub type u8_ = ::std::os::raw::c_uchar;
-pub type u32_ = ::std::os::raw::c_uint;
-pub type u16_ = ::std::os::raw::c_ushort;
-pub type u64_ = u64;
-pub type s64 = i64;
 pub type __gnuc_va_list = __builtin_va_list;
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -2296,12 +2307,63 @@ fn bindgen_test_layout_array() {
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct ndb_str_block {
+    pub str_: *const ::std::os::raw::c_char,
+    pub len: u32,
+}
+#[test]
+fn bindgen_test_layout_ndb_str_block() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_str_block> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_str_block>(),
+        16usize,
+        concat!("Size of: ", stringify!(ndb_str_block))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_str_block>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_str_block))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).str_) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_str_block),
+            "::",
+            stringify!(str_)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).len) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_str_block),
+            "::",
+            stringify!(len)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct ndb_json_parser {
     _unused: [u8; 0],
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ndb {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_blocks {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_block {
     _unused: [u8; 0],
 }
 #[repr(C)]
@@ -2327,6 +2389,11 @@ pub struct ndb_lmdb {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct ndb_packed_str {
+    _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct bolt11 {
     _unused: [u8; 0],
 }
 #[repr(C)]
@@ -2958,7 +3025,8 @@ pub const ndb_dbs_NDB_DB_PROFILE_SEARCH: ndb_dbs = 6;
 pub const ndb_dbs_NDB_DB_PROFILE_LAST_FETCH: ndb_dbs = 7;
 pub const ndb_dbs_NDB_DB_NOTE_KIND: ndb_dbs = 8;
 pub const ndb_dbs_NDB_DB_NOTE_TEXT: ndb_dbs = 9;
-pub const ndb_dbs_NDB_DBS: ndb_dbs = 10;
+pub const ndb_dbs_NDB_DB_NOTE_BLOCKS: ndb_dbs = 10;
+pub const ndb_dbs_NDB_DBS: ndb_dbs = 11;
 pub type ndb_dbs = ::std::os::raw::c_uint;
 pub const ndb_common_kind_NDB_CKIND_PROFILE: ndb_common_kind = 0;
 pub const ndb_common_kind_NDB_CKIND_TEXT: ndb_common_kind = 1;
@@ -3514,7 +3582,7 @@ fn bindgen_test_layout_ndb_stat_counts() {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ndb_stat {
-    pub dbs: [ndb_stat_counts; 10usize],
+    pub dbs: [ndb_stat_counts; 11usize],
     pub common_kinds: [ndb_stat_counts; 15usize],
     pub other_kinds: ndb_stat_counts,
 }
@@ -3524,7 +3592,7 @@ fn bindgen_test_layout_ndb_stat() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<ndb_stat>(),
-        624usize,
+        648usize,
         concat!("Size of: ", stringify!(ndb_stat))
     );
     assert_eq!(
@@ -3544,7 +3612,7 @@ fn bindgen_test_layout_ndb_stat() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).common_kinds) as usize - ptr as usize },
-        240usize,
+        264usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_stat),
@@ -3554,7 +3622,7 @@ fn bindgen_test_layout_ndb_stat() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).other_kinds) as usize - ptr as usize },
-        600usize,
+        624usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_stat),
@@ -3570,7 +3638,7 @@ pub struct ndb_text_search_key {
     pub str_: *const ::std::os::raw::c_char,
     pub timestamp: u64,
     pub note_id: u64,
-    pub word_index: ::std::os::raw::c_int,
+    pub word_index: u64,
 }
 #[test]
 fn bindgen_test_layout_ndb_text_search_key() {
@@ -3718,6 +3786,455 @@ fn bindgen_test_layout_ndb_text_search_results() {
             stringify!(ndb_text_search_results),
             "::",
             stringify!(num_results)
+        )
+    );
+}
+pub const ndb_block_type_BLOCK_HASHTAG: ndb_block_type = 1;
+pub const ndb_block_type_BLOCK_TEXT: ndb_block_type = 2;
+pub const ndb_block_type_BLOCK_MENTION_INDEX: ndb_block_type = 3;
+pub const ndb_block_type_BLOCK_MENTION_BECH32: ndb_block_type = 4;
+pub const ndb_block_type_BLOCK_URL: ndb_block_type = 5;
+pub const ndb_block_type_BLOCK_INVOICE: ndb_block_type = 6;
+pub type ndb_block_type = ::std::os::raw::c_uint;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_relays {
+    pub relays: [ndb_str_block; 24usize],
+    pub num_relays: ::std::os::raw::c_int,
+}
+#[test]
+fn bindgen_test_layout_ndb_relays() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_relays> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_relays>(),
+        392usize,
+        concat!("Size of: ", stringify!(ndb_relays))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_relays>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_relays))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).relays) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_relays),
+            "::",
+            stringify!(relays)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).num_relays) as usize - ptr as usize },
+        384usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_relays),
+            "::",
+            stringify!(num_relays)
+        )
+    );
+}
+pub const nostr_bech32_type_NOSTR_BECH32_NOTE: nostr_bech32_type = 1;
+pub const nostr_bech32_type_NOSTR_BECH32_NPUB: nostr_bech32_type = 2;
+pub const nostr_bech32_type_NOSTR_BECH32_NPROFILE: nostr_bech32_type = 3;
+pub const nostr_bech32_type_NOSTR_BECH32_NEVENT: nostr_bech32_type = 4;
+pub const nostr_bech32_type_NOSTR_BECH32_NRELAY: nostr_bech32_type = 5;
+pub const nostr_bech32_type_NOSTR_BECH32_NADDR: nostr_bech32_type = 6;
+pub const nostr_bech32_type_NOSTR_BECH32_NSEC: nostr_bech32_type = 7;
+pub type nostr_bech32_type = ::std::os::raw::c_uint;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct bech32_note {
+    pub event_id: *const ::std::os::raw::c_uchar,
+}
+#[test]
+fn bindgen_test_layout_bech32_note() {
+    const UNINIT: ::std::mem::MaybeUninit<bech32_note> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<bech32_note>(),
+        8usize,
+        concat!("Size of: ", stringify!(bech32_note))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<bech32_note>(),
+        8usize,
+        concat!("Alignment of ", stringify!(bech32_note))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).event_id) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(bech32_note),
+            "::",
+            stringify!(event_id)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct bech32_npub {
+    pub pubkey: *const ::std::os::raw::c_uchar,
+}
+#[test]
+fn bindgen_test_layout_bech32_npub() {
+    const UNINIT: ::std::mem::MaybeUninit<bech32_npub> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<bech32_npub>(),
+        8usize,
+        concat!("Size of: ", stringify!(bech32_npub))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<bech32_npub>(),
+        8usize,
+        concat!("Alignment of ", stringify!(bech32_npub))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).pubkey) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(bech32_npub),
+            "::",
+            stringify!(pubkey)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct bech32_nsec {
+    pub nsec: *const ::std::os::raw::c_uchar,
+}
+#[test]
+fn bindgen_test_layout_bech32_nsec() {
+    const UNINIT: ::std::mem::MaybeUninit<bech32_nsec> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<bech32_nsec>(),
+        8usize,
+        concat!("Size of: ", stringify!(bech32_nsec))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<bech32_nsec>(),
+        8usize,
+        concat!("Alignment of ", stringify!(bech32_nsec))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).nsec) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(bech32_nsec),
+            "::",
+            stringify!(nsec)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct bech32_nevent {
+    pub relays: ndb_relays,
+    pub event_id: *const ::std::os::raw::c_uchar,
+    pub pubkey: *const ::std::os::raw::c_uchar,
+}
+#[test]
+fn bindgen_test_layout_bech32_nevent() {
+    const UNINIT: ::std::mem::MaybeUninit<bech32_nevent> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<bech32_nevent>(),
+        408usize,
+        concat!("Size of: ", stringify!(bech32_nevent))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<bech32_nevent>(),
+        8usize,
+        concat!("Alignment of ", stringify!(bech32_nevent))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).relays) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(bech32_nevent),
+            "::",
+            stringify!(relays)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).event_id) as usize - ptr as usize },
+        392usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(bech32_nevent),
+            "::",
+            stringify!(event_id)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).pubkey) as usize - ptr as usize },
+        400usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(bech32_nevent),
+            "::",
+            stringify!(pubkey)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct bech32_nprofile {
+    pub relays: ndb_relays,
+    pub pubkey: *const ::std::os::raw::c_uchar,
+}
+#[test]
+fn bindgen_test_layout_bech32_nprofile() {
+    const UNINIT: ::std::mem::MaybeUninit<bech32_nprofile> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<bech32_nprofile>(),
+        400usize,
+        concat!("Size of: ", stringify!(bech32_nprofile))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<bech32_nprofile>(),
+        8usize,
+        concat!("Alignment of ", stringify!(bech32_nprofile))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).relays) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(bech32_nprofile),
+            "::",
+            stringify!(relays)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).pubkey) as usize - ptr as usize },
+        392usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(bech32_nprofile),
+            "::",
+            stringify!(pubkey)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct bech32_naddr {
+    pub relays: ndb_relays,
+    pub identifier: ndb_str_block,
+    pub pubkey: *const ::std::os::raw::c_uchar,
+}
+#[test]
+fn bindgen_test_layout_bech32_naddr() {
+    const UNINIT: ::std::mem::MaybeUninit<bech32_naddr> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<bech32_naddr>(),
+        416usize,
+        concat!("Size of: ", stringify!(bech32_naddr))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<bech32_naddr>(),
+        8usize,
+        concat!("Alignment of ", stringify!(bech32_naddr))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).relays) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(bech32_naddr),
+            "::",
+            stringify!(relays)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).identifier) as usize - ptr as usize },
+        392usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(bech32_naddr),
+            "::",
+            stringify!(identifier)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).pubkey) as usize - ptr as usize },
+        408usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(bech32_naddr),
+            "::",
+            stringify!(pubkey)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct bech32_nrelay {
+    pub relay: ndb_str_block,
+}
+#[test]
+fn bindgen_test_layout_bech32_nrelay() {
+    const UNINIT: ::std::mem::MaybeUninit<bech32_nrelay> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<bech32_nrelay>(),
+        16usize,
+        concat!("Size of: ", stringify!(bech32_nrelay))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<bech32_nrelay>(),
+        8usize,
+        concat!("Alignment of ", stringify!(bech32_nrelay))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).relay) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(bech32_nrelay),
+            "::",
+            stringify!(relay)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct nostr_bech32 {
+    pub type_: nostr_bech32_type,
+    pub __bindgen_anon_1: nostr_bech32__bindgen_ty_1,
+}
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union nostr_bech32__bindgen_ty_1 {
+    pub note: bech32_note,
+    pub npub: bech32_npub,
+    pub nsec: bech32_nsec,
+    pub nevent: bech32_nevent,
+    pub nprofile: bech32_nprofile,
+    pub naddr: bech32_naddr,
+    pub nrelay: bech32_nrelay,
+}
+#[test]
+fn bindgen_test_layout_nostr_bech32__bindgen_ty_1() {
+    const UNINIT: ::std::mem::MaybeUninit<nostr_bech32__bindgen_ty_1> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<nostr_bech32__bindgen_ty_1>(),
+        416usize,
+        concat!("Size of: ", stringify!(nostr_bech32__bindgen_ty_1))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<nostr_bech32__bindgen_ty_1>(),
+        8usize,
+        concat!("Alignment of ", stringify!(nostr_bech32__bindgen_ty_1))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).note) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nostr_bech32__bindgen_ty_1),
+            "::",
+            stringify!(note)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).npub) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nostr_bech32__bindgen_ty_1),
+            "::",
+            stringify!(npub)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).nsec) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nostr_bech32__bindgen_ty_1),
+            "::",
+            stringify!(nsec)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).nevent) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nostr_bech32__bindgen_ty_1),
+            "::",
+            stringify!(nevent)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).nprofile) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nostr_bech32__bindgen_ty_1),
+            "::",
+            stringify!(nprofile)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).naddr) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nostr_bech32__bindgen_ty_1),
+            "::",
+            stringify!(naddr)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).nrelay) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nostr_bech32__bindgen_ty_1),
+            "::",
+            stringify!(nrelay)
+        )
+    );
+}
+#[test]
+fn bindgen_test_layout_nostr_bech32() {
+    const UNINIT: ::std::mem::MaybeUninit<nostr_bech32> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<nostr_bech32>(),
+        424usize,
+        concat!("Size of: ", stringify!(nostr_bech32))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<nostr_bech32>(),
+        8usize,
+        concat!("Alignment of ", stringify!(nostr_bech32))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).type_) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nostr_bech32),
+            "::",
+            stringify!(type_)
         )
     );
 }
@@ -4102,6 +4619,64 @@ extern "C" {
 }
 extern "C" {
     pub fn ndb_kind_to_common_kind(kind: ::std::os::raw::c_int) -> ndb_common_kind;
+}
+extern "C" {
+    pub fn ndb_parse_content(
+        buf: *mut ::std::os::raw::c_uchar,
+        buf_size: ::std::os::raw::c_int,
+        content: *const ::std::os::raw::c_char,
+        content_len: ::std::os::raw::c_int,
+        blocks_p: *mut *mut ndb_blocks,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_block_type(blocks: *mut ndb_blocks) -> ndb_block_type;
+}
+extern "C" {
+    pub fn ndb_blocks_total_size(blocks: *mut ndb_blocks) -> usize;
+}
+extern "C" {
+    #[doc = " Free blocks if they are owned, safe to call on unowned blocks as well."]
+    pub fn ndb_blocks_free(blocks: *mut ndb_blocks);
+}
+extern "C" {
+    pub fn ndb_get_blocks_by_key(
+        ndb: *mut ndb,
+        txn: *mut ndb_txn,
+        note_key: u64,
+    ) -> *mut ndb_blocks;
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_block_iterator {
+    _unused: [u8; 0],
+}
+extern "C" {
+    pub fn ndb_blocks_iterate_start(
+        arg1: *const ::std::os::raw::c_char,
+        arg2: *mut ndb_blocks,
+    ) -> *mut ndb_block_iterator;
+}
+extern "C" {
+    pub fn ndb_blocks_iterate_free(arg1: *mut ndb_block_iterator);
+}
+extern "C" {
+    pub fn ndb_blocks_iterate_next(arg1: *mut ndb_block_iterator) -> *mut ndb_block;
+}
+extern "C" {
+    pub fn ndb_get_block_type(block: *mut ndb_block) -> ndb_block_type;
+}
+extern "C" {
+    pub fn ndb_block_str(arg1: *mut ndb_block) -> *mut ndb_str_block;
+}
+extern "C" {
+    pub fn ndb_str_block_ptr(arg1: *mut ndb_str_block) -> *const ::std::os::raw::c_char;
+}
+extern "C" {
+    pub fn ndb_str_block_len(arg1: *mut ndb_str_block) -> u32;
+}
+extern "C" {
+    pub fn ndb_bech32_block(block: *mut ndb_block) -> *mut nostr_bech32;
 }
 pub type __builtin_va_list = [__va_list_tag; 1usize];
 #[repr(C)]
