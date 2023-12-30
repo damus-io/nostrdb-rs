@@ -86,11 +86,11 @@ fn main() {
 
     // Re-run the build script if any of the C files or headers change
     for file in &[
-        "nostrdb/nostrdb.c",
-        "nostrdb/sha256.c",
-        "nostrdb/bech32.c",
-        "nostrdb/nostrdb.h",
-        "nostrdb/sha256.h",
+        "nostrdb/src/nostrdb.c",
+        "nostrdb/src/sha256.c",
+        "nostrdb/src/bech32.c",
+        "nostrdb/src/nostrdb.h",
+        "nostrdb/src/sha256.h",
     ] {
         println!("cargo:rerun-if-changed={}", file);
     }
@@ -107,14 +107,15 @@ fn main() {
     // I don't want to complicate the build with it.
     //
 
-    /*
-    let bindings = bindgen::Builder::default()
-        .header("nostrdb/nostrdb.h")
-        .generate()
-        .expect("Unable to generate bindings");
+    #[cfg(feature = "bindgen")]
+    {
+        let bindings = bindgen::Builder::default()
+            .header("nostrdb/src/nostrdb.h")
+            .generate()
+            .expect("Unable to generate bindings");
 
-    bindings
-        .write_to_file("src/bindings.rs")
-        .expect("Couldn't write bindings!");
-        */
+        bindings
+            .write_to_file("src/bindings.rs")
+            .expect("Couldn't write bindings!");
+    }
 }
