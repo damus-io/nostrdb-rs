@@ -99,6 +99,13 @@ impl<'a> Note<'a> {
         }
     }
 
+    pub fn id(&self) -> &'a [u8; 32] {
+        unsafe {
+            let ptr = bindings::ndb_note_id(self.as_ptr());
+            &*(ptr as *const [u8; 32])
+        }
+    }
+
     pub fn kind(&self) -> u32 {
         unsafe { bindings::ndb_note_kind(self.as_ptr()) }
     }
