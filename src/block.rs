@@ -196,7 +196,7 @@ mod tests {
         let db = "target/testdbs/note_blocks";
 
         {
-            let mut ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
             ndb.process_event("[\"EVENT\",\"s\",{\"id\":\"d28ac02e277c3cf2744b562a414fd92d5fea554a737901364735bfe74577f304\",\"pubkey\":\"b5b1b5d2914daa2eda99af22ae828effe98730bf69dcca000fa37bfb9e395e32\",\"created_at\": 1703989205,\"kind\": 1,\"tags\": [],\"content\": \"#hashtags, are neat nostr:nprofile1qqsr9cvzwc652r4m83d86ykplrnm9dg5gwdvzzn8ameanlvut35wy3gpz3mhxue69uhhyetvv9ujuerpd46hxtnfduyu75sw https://github.com/damus-io\",\"sig\": \"07af3062616a17ef392769cadb170ac855c817c103e007c72374499bbadb2fe8917a0cc5b3fdc5aa5d56de086e128b3aeaa8868f6fe42a409767241b6a29cc94\"}]").expect("process ok");
         }
 

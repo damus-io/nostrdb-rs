@@ -33,7 +33,6 @@ mod tests {
     #[test]
     fn profile_record_words() {
         use crate::config::Config;
-        use crate::error::Error;
         use crate::ndb::Ndb;
         use crate::test_util;
 
