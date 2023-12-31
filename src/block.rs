@@ -105,6 +105,12 @@ impl<'a> Blocks<'a> {
     }
 }
 
+impl<'a> Drop for Blocks<'a> {
+    fn drop(&mut self) {
+        unsafe { bindings::ndb_blocks_free(self.as_ptr()) };
+    }
+}
+
 impl<'a> BlockIter<'a> {
     pub(crate) fn new_transactional(
         content: *const ::std::os::raw::c_char,
