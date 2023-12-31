@@ -56,8 +56,6 @@ fn main() {
             "nostrdb/src/bolt11/tal.c",
             "nostrdb/src/bolt11/talstr.c",
             "nostrdb/src/bolt11/utf8.c",
-            "nostrdb/src/nostrdb.c",
-            "nostrdb/src/sha256.c",
             "nostrdb/src/invoice.c",
             "nostrdb/src/nostr_bech32.c",
             "nostrdb/src/content_parser.c",
@@ -88,7 +86,6 @@ fn main() {
     for file in &[
         "nostrdb/src/nostrdb.c",
         "nostrdb/src/sha256.c",
-        "nostrdb/src/bech32.c",
         "nostrdb/src/nostrdb.h",
         "nostrdb/src/sha256.h",
     ] {

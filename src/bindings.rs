@@ -2363,11 +2363,6 @@ pub struct ndb_blocks {
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct ndb_block {
-    _unused: [u8; 0],
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
 pub struct ndb_note {
     _unused: [u8; 0],
 }
@@ -4238,6 +4233,342 @@ fn bindgen_test_layout_nostr_bech32() {
         )
     );
 }
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ndb_mention_bech32_block {
+    pub str_: ndb_str_block,
+    pub bech32: nostr_bech32,
+}
+#[test]
+fn bindgen_test_layout_ndb_mention_bech32_block() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_mention_bech32_block> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_mention_bech32_block>(),
+        440usize,
+        concat!("Size of: ", stringify!(ndb_mention_bech32_block))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_mention_bech32_block>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_mention_bech32_block))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).str_) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_mention_bech32_block),
+            "::",
+            stringify!(str_)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).bech32) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_mention_bech32_block),
+            "::",
+            stringify!(bech32)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_invoice {
+    pub version: ::std::os::raw::c_uchar,
+    pub amount: u64,
+    pub timestamp: u64,
+    pub expiry: u64,
+    pub description: *mut ::std::os::raw::c_char,
+    pub description_hash: *mut ::std::os::raw::c_uchar,
+}
+#[test]
+fn bindgen_test_layout_ndb_invoice() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_invoice> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_invoice>(),
+        48usize,
+        concat!("Size of: ", stringify!(ndb_invoice))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_invoice>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_invoice))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).version) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_invoice),
+            "::",
+            stringify!(version)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).amount) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_invoice),
+            "::",
+            stringify!(amount)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).timestamp) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_invoice),
+            "::",
+            stringify!(timestamp)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).expiry) as usize - ptr as usize },
+        24usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_invoice),
+            "::",
+            stringify!(expiry)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).description) as usize - ptr as usize },
+        32usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_invoice),
+            "::",
+            stringify!(description)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).description_hash) as usize - ptr as usize },
+        40usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_invoice),
+            "::",
+            stringify!(description_hash)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_invoice_block {
+    pub invstr: ndb_str_block,
+    pub invoice: ndb_invoice,
+}
+#[test]
+fn bindgen_test_layout_ndb_invoice_block() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_invoice_block> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_invoice_block>(),
+        64usize,
+        concat!("Size of: ", stringify!(ndb_invoice_block))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_invoice_block>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_invoice_block))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).invstr) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_invoice_block),
+            "::",
+            stringify!(invstr)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).invoice) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_invoice_block),
+            "::",
+            stringify!(invoice)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ndb_block {
+    pub type_: ndb_block_type,
+    pub block: ndb_block__bindgen_ty_1,
+}
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union ndb_block__bindgen_ty_1 {
+    pub str_: ndb_str_block,
+    pub invoice: ndb_invoice_block,
+    pub mention_bech32: ndb_mention_bech32_block,
+    pub mention_index: u32,
+}
+#[test]
+fn bindgen_test_layout_ndb_block__bindgen_ty_1() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_block__bindgen_ty_1> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_block__bindgen_ty_1>(),
+        440usize,
+        concat!("Size of: ", stringify!(ndb_block__bindgen_ty_1))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_block__bindgen_ty_1>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_block__bindgen_ty_1))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).str_) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_block__bindgen_ty_1),
+            "::",
+            stringify!(str_)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).invoice) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_block__bindgen_ty_1),
+            "::",
+            stringify!(invoice)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).mention_bech32) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_block__bindgen_ty_1),
+            "::",
+            stringify!(mention_bech32)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).mention_index) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_block__bindgen_ty_1),
+            "::",
+            stringify!(mention_index)
+        )
+    );
+}
+#[test]
+fn bindgen_test_layout_ndb_block() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_block> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_block>(),
+        448usize,
+        concat!("Size of: ", stringify!(ndb_block))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_block>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_block))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).type_) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_block),
+            "::",
+            stringify!(type_)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).block) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_block),
+            "::",
+            stringify!(block)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ndb_block_iterator {
+    pub content: *const ::std::os::raw::c_char,
+    pub blocks: *mut ndb_blocks,
+    pub block: ndb_block,
+    pub p: *mut ::std::os::raw::c_uchar,
+}
+#[test]
+fn bindgen_test_layout_ndb_block_iterator() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_block_iterator> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_block_iterator>(),
+        472usize,
+        concat!("Size of: ", stringify!(ndb_block_iterator))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_block_iterator>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_block_iterator))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).content) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_block_iterator),
+            "::",
+            stringify!(content)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).blocks) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_block_iterator),
+            "::",
+            stringify!(blocks)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).block) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_block_iterator),
+            "::",
+            stringify!(block)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).p) as usize - ptr as usize },
+        464usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_block_iterator),
+            "::",
+            stringify!(p)
+        )
+    );
+}
 extern "C" {
     pub fn ndb_default_config(arg1: *mut ndb_config);
 }
@@ -4646,19 +4977,12 @@ extern "C" {
         note_key: u64,
     ) -> *mut ndb_blocks;
 }
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct ndb_block_iterator {
-    _unused: [u8; 0],
-}
 extern "C" {
     pub fn ndb_blocks_iterate_start(
         arg1: *const ::std::os::raw::c_char,
         arg2: *mut ndb_blocks,
-    ) -> *mut ndb_block_iterator;
-}
-extern "C" {
-    pub fn ndb_blocks_iterate_free(arg1: *mut ndb_block_iterator);
+        arg3: *mut ndb_block_iterator,
+    );
 }
 extern "C" {
     pub fn ndb_blocks_iterate_next(arg1: *mut ndb_block_iterator) -> *mut ndb_block;
