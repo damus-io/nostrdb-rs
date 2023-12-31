@@ -65,8 +65,7 @@ impl<'a> Block<'a> {
 
     pub fn blocktype(&self) -> BlockType {
         let typ = unsafe { bindings::ndb_get_block_type(self.as_ptr()) };
-        println!("type {}", typ);
-        let r = match typ {
+        match typ {
             1 => BlockType::Hashtag,
             2 => BlockType::Text,
             3 => BlockType::MentionIndex,
@@ -74,9 +73,7 @@ impl<'a> Block<'a> {
             5 => BlockType::Url,
             6 => BlockType::Invoice,
             _ => panic!("Invalid blocktype {}", typ),
-        };
-        println!("typer {:?}", r);
-        r
+        }
     }
 }
 
