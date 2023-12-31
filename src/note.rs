@@ -53,6 +53,13 @@ impl<'a> Note<'a> {
         }
     }
 
+    pub fn key(&self) -> Option<u64> {
+        match self {
+            Note::Transactional { key, .. } => Some(*key),
+            _ => None,
+        }
+    }
+
     pub fn size(&self) -> usize {
         match self {
             Note::Owned { size, .. } => *size,
@@ -71,10 +78,14 @@ impl<'a> Note<'a> {
         unsafe { bindings::ndb_note_content_length(self.as_ptr()) as usize }
     }
 
+    pub fn content_ptr(&self) -> *const ::std::os::raw::c_char {
+        unsafe { bindings::ndb_note_content(self.as_ptr()) }
+    }
+
     /// Get the [`Note`] contents.
     pub fn content(&self) -> &'a str {
         unsafe {
-            let content = bindings::ndb_note_content(self.as_ptr());
+            let content = self.content_ptr();
             let byte_slice = std::slice::from_raw_parts(content as *const u8, self.content_size());
             std::str::from_utf8_unchecked(byte_slice)
         }

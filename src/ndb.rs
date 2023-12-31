@@ -3,7 +3,7 @@ use std::ffi::CString;
 use std::ptr;
 
 use crate::bindings;
-use crate::{Config, Error, Note, ProfileRecord, Result, Transaction};
+use crate::{Blocks, Config, Error, Note, ProfileRecord, Result, Transaction};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -88,7 +88,7 @@ impl Ndb {
 
         let profile_record_ptr = unsafe {
             bindings::ndb_get_profile_by_pubkey(
-                transaction.as_ptr() as *mut bindings::ndb_txn,
+                transaction.as_mut_ptr(),
                 id.as_ptr(),
                 &mut len,
                 &mut primkey,
@@ -107,6 +107,32 @@ impl Ndb {
             primkey,
             transaction,
         ))
+    }
+
+    pub fn get_notekey_by_id(&self, txn: &Transaction, id: &[u8; 32]) -> Result<u64> {
+        let res = unsafe {
+            bindings::ndb_get_notekey_by_id(
+                txn.as_mut_ptr(),
+                id.as_ptr() as *const ::std::os::raw::c_uchar,
+            )
+        };
+
+        if res == 0 {
+            return Err(Error::NotFound);
+        }
+
+        Ok(res)
+    }
+
+    pub fn get_blocks_by_key<'a>(&self, txn: &'a Transaction, note_key: u64) -> Result<Blocks<'a>> {
+        let blocks_ptr =
+            unsafe { bindings::ndb_get_blocks_by_key(self.as_ptr(), txn.as_mut_ptr(), note_key) };
+
+        if blocks_ptr.is_null() {
+            return Err(Error::NotFound);
+        }
+
+        Ok(Blocks::new_transactional(blocks_ptr, txn))
     }
 
     /// Get a note from the database. Takes a [Transaction] and a 32-byte [Note] Id

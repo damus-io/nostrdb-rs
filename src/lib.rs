@@ -8,6 +8,7 @@ mod bindings;
 #[allow(non_snake_case)]
 mod ndb_profile;
 
+mod block;
 mod config;
 mod error;
 mod ndb;
@@ -16,6 +17,7 @@ mod profile;
 mod result;
 mod transaction;
 
+pub use block::Blocks;
 pub use config::Config;
 pub use error::Error;
 pub use ndb::Ndb;

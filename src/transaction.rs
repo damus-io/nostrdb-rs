@@ -27,8 +27,8 @@ impl Transaction {
         &self.txn
     }
 
-    pub fn as_mut_ptr(&mut self) -> *mut bindings::ndb_txn {
-        &mut self.txn
+    pub fn as_mut_ptr(&self) -> *mut bindings::ndb_txn {
+        self.as_ptr() as *mut bindings::ndb_txn
     }
 }
 

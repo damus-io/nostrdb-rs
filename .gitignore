@@ -1,6 +1,7 @@
 .direnv/
 /nostrdb
 Cargo.lock
+tags
 target/
 .build-result
 .buildcmd
