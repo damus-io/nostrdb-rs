@@ -18,7 +18,7 @@ pub struct BlockIter<'a> {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-enum BlockType {
+pub enum BlockType {
     Hashtag,
     Text,
     MentionIndex,
