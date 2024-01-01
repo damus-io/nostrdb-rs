@@ -27,6 +27,91 @@ pub enum BlockType {
     Invoice,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub enum Bech32Type {
+    Event,
+    Pubkey,
+    Profile,
+    Note,
+    Relay,
+    Addr,
+    Secret,
+}
+
+pub enum Mention<'a> {
+    Pubkey(&'a bindings::bech32_npub),
+    Event(&'a bindings::bech32_nevent),
+    Profile(&'a bindings::bech32_nprofile),
+    Note(&'a bindings::bech32_note),
+    Relay(&'a bindings::bech32_nrelay),
+    Secret(&'a bindings::bech32_nsec),
+    Addr(&'a bindings::bech32_naddr),
+}
+
+impl bindings::bech32_nprofile {
+    pub fn pubkey(&self) -> &[u8; 32] {
+        unsafe { &*(self.pubkey as *const [u8; 32]) }
+    }
+}
+
+impl bindings::bech32_npub {
+    pub fn pubkey(&self) -> &[u8; 32] {
+        unsafe { &*(self.pubkey as *const [u8; 32]) }
+    }
+}
+
+impl bindings::bech32_note {
+    pub fn id(&self) -> &[u8; 32] {
+        unsafe { &*(self.event_id as *const [u8; 32]) }
+    }
+}
+
+impl bindings::bech32_nevent {
+    pub fn id(&self) -> &[u8; 32] {
+        unsafe { &*(self.event_id as *const [u8; 32]) }
+    }
+
+    pub fn pubkey(&self) -> Option<&[u8; 32]> {
+        unsafe {
+            if self.pubkey.is_null() {
+                return None;
+            }
+            Some(&*(self.pubkey as *const [u8; 32]))
+        }
+    }
+}
+
+impl<'a> Mention<'a> {
+    pub fn new(bech32: &'a bindings::nostr_bech32) -> Self {
+        unsafe {
+            match Bech32Type::from_ctype(bech32.type_) {
+                Bech32Type::Event => Mention::Event(&bech32.__bindgen_anon_1.nevent),
+                Bech32Type::Pubkey => Mention::Pubkey(&bech32.__bindgen_anon_1.npub),
+                Bech32Type::Profile => Mention::Profile(&bech32.__bindgen_anon_1.nprofile),
+                Bech32Type::Note => Mention::Note(&bech32.__bindgen_anon_1.note),
+                Bech32Type::Relay => Mention::Relay(&bech32.__bindgen_anon_1.nrelay),
+                Bech32Type::Secret => Mention::Secret(&bech32.__bindgen_anon_1.nsec),
+                Bech32Type::Addr => Mention::Addr(&bech32.__bindgen_anon_1.naddr),
+            }
+        }
+    }
+}
+
+impl Bech32Type {
+    pub(crate) fn from_ctype(typ: bindings::nostr_bech32_type) -> Bech32Type {
+        match typ {
+            1 => Bech32Type::Note,
+            2 => Bech32Type::Pubkey,
+            3 => Bech32Type::Profile,
+            4 => Bech32Type::Event,
+            5 => Bech32Type::Relay,
+            6 => Bech32Type::Addr,
+            7 => Bech32Type::Secret,
+            _ => panic!("Invalid bech32 type"),
+        }
+    }
+}
+
 impl<'a> Block<'a> {
     pub(crate) fn new_transactional(
         ptr: *mut bindings::ndb_block,
@@ -50,6 +135,13 @@ impl<'a> Block<'a> {
         self.ptr
     }
 
+    pub fn as_mention(&'a self) -> Option<Mention<'a>> {
+        if self.blocktype() != BlockType::MentionBech32 {
+            return None;
+        }
+        Some(Mention::new(self.c_bech32()))
+    }
+
     pub fn as_str(&self) -> &'a str {
         unsafe {
             let str_block = bindings::ndb_block_str(self.as_ptr());
@@ -61,6 +153,10 @@ impl<'a> Block<'a> {
             let byte_slice = std::slice::from_raw_parts(ptr, len.try_into().unwrap());
             std::str::from_utf8_unchecked(byte_slice)
         }
+    }
+
+    fn c_bech32(&'a self) -> &'a bindings::nostr_bech32 {
+        unsafe { &(*self.as_ptr()).block.mention_bech32.bech32 }
     }
 
     pub fn blocktype(&self) -> BlockType {
@@ -211,8 +307,12 @@ mod tests {
             let id =
                 hex::decode("d28ac02e277c3cf2744b562a414fd92d5fea554a737901364735bfe74577f304")
                     .expect("hex id");
+            let pubkey =
+                hex::decode("32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245")
+                    .expect("jb55 pubkey");
             let txn = Transaction::new(&ndb).expect("txn");
             let id_bytes: [u8; 32] = id.try_into().expect("id bytes");
+            let pubkey_bytes: [u8; 32] = pubkey.try_into().expect("pubkey bytes");
             let note = ndb.get_note_by_id(&txn, &id_bytes).unwrap();
             let blocks = ndb
                 .get_blocks_by_key(&txn, note.key().unwrap())
@@ -233,6 +333,10 @@ mod tests {
                     2 => {
                         assert_eq!(block.blocktype(), BlockType::MentionBech32);
                         assert_eq!(block.as_str(), "nprofile1qqsr9cvzwc652r4m83d86ykplrnm9dg5gwdvzzn8ameanlvut35wy3gpz3mhxue69uhhyetvv9ujuerpd46hxtnfduyu75sw");
+                        match block.as_mention().unwrap() {
+                            Mention::Profile(p) => assert_eq!(p.pubkey(), &pubkey_bytes),
+                            _ => assert!(false),
+                        };
                     }
 
                     3 => {

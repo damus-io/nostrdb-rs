@@ -17,7 +17,7 @@ mod profile;
 mod result;
 mod transaction;
 
-pub use block::{Block, BlockType, Blocks};
+pub use block::{Block, BlockType, Blocks, Mention};
 pub use config::Config;
 pub use error::Error;
 pub use ndb::Ndb;
