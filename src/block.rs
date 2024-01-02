@@ -48,6 +48,23 @@ pub enum Mention<'a> {
     Addr(&'a bindings::bech32_naddr),
 }
 
+impl bindings::ndb_str_block {
+    pub fn as_str(&self) -> &str {
+        unsafe {
+            let ptr = bindings::ndb_str_block_ptr(self as *const Self as *mut Self) as *const u8;
+            let len = bindings::ndb_str_block_len(self as *const Self as *mut Self);
+            let byte_slice = std::slice::from_raw_parts(ptr, len.try_into().unwrap());
+            std::str::from_utf8_unchecked(byte_slice)
+        }
+    }
+}
+
+impl bindings::bech32_nrelay {
+    pub fn as_str(&self) -> &str {
+        self.relay.as_str()
+    }
+}
+
 impl bindings::bech32_nprofile {
     pub fn pubkey(&self) -> &[u8; 32] {
         unsafe { &*(self.pubkey as *const [u8; 32]) }
@@ -148,10 +165,8 @@ impl<'a> Block<'a> {
             if str_block.is_null() {
                 return "";
             }
-            let ptr = bindings::ndb_str_block_ptr(str_block) as *const u8;
-            let len = bindings::ndb_str_block_len(str_block);
-            let byte_slice = std::slice::from_raw_parts(ptr, len.try_into().unwrap());
-            std::str::from_utf8_unchecked(byte_slice)
+
+            (&*str_block).as_str()
         }
     }
 
