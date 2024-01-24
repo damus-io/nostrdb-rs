@@ -78,6 +78,10 @@ impl<'a> Note<'a> {
         unsafe { bindings::ndb_note_content_length(self.as_ptr()) as usize }
     }
 
+    fn created_at(&self) -> u64 {
+        unsafe { bindings::ndb_note_created_at(self.as_ptr()).into() }
+    }
+
     pub fn content_ptr(&self) -> *const ::std::os::raw::c_char {
         unsafe { bindings::ndb_note_content(self.as_ptr()) }
     }
