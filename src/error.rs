@@ -7,6 +7,7 @@ pub enum Error {
     DecodeError,
     NoteProcessFailed,
     TransactionFailed,
+    SubscriptionError,
 }
 
 impl fmt::Display for Error {
@@ -17,6 +18,7 @@ impl fmt::Display for Error {
             Error::DecodeError => "Decode error",
             Error::NoteProcessFailed => "Note process failed",
             Error::TransactionFailed => "Transaction failed",
+            Error::SubscriptionError => "Subscription failed",
         };
         write!(f, "{}", s)
     }
