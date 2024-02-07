@@ -123,7 +123,7 @@ impl Filter {
 
     pub fn events(&mut self, events: Vec<[u8; 32]>) -> &mut Filter {
         self.start_tag_field('e');
-        for id in events {
+        for ref id in events {
             self.add_id_element(id);
         }
         self.end_field();
@@ -132,7 +132,7 @@ impl Filter {
 
     pub fn ids(&mut self, ids: Vec<[u8; 32]>) -> &mut Filter {
         self.start_ids_field();
-        for id in ids {
+        for ref id in ids {
             self.add_id_element(id);
         }
         self.end_field();
@@ -141,7 +141,7 @@ impl Filter {
 
     pub fn pubkeys(&mut self, pubkeys: Vec<[u8; 32]>) -> &mut Filter {
         self.start_tag_field('p');
-        for pk in pubkeys {
+        for ref pk in pubkeys {
             self.add_id_element(pk);
         }
         self.end_field();
@@ -168,7 +168,7 @@ impl Filter {
 
     pub fn pubkey(&mut self, pubkeys: Vec<[u8; 32]>) -> &mut Filter {
         self.start_pubkeys_field();
-        for pubkey in pubkeys {
+        for ref pubkey in pubkeys {
             self.add_id_element(pubkey);
         }
         self.end_field();
