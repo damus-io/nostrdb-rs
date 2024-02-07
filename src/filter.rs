@@ -121,7 +121,7 @@ impl Filter {
         unsafe { bindings::ndb_filter_end_field(self.as_mut_ptr()) }
     }
 
-    pub fn events(&mut self, events: Vec<&[u8; 32]>) -> &mut Filter {
+    pub fn events(&mut self, events: Vec<[u8; 32]>) -> &mut Filter {
         self.start_tag_field('e');
         for id in events {
             self.add_id_element(id);
@@ -130,7 +130,7 @@ impl Filter {
         self
     }
 
-    pub fn ids(&mut self, ids: Vec<&[u8; 32]>) -> &mut Filter {
+    pub fn ids(&mut self, ids: Vec<[u8; 32]>) -> &mut Filter {
         self.start_ids_field();
         for id in ids {
             self.add_id_element(id);
@@ -139,7 +139,7 @@ impl Filter {
         self
     }
 
-    pub fn pubkeys(&mut self, pubkeys: Vec<&[u8; 32]>) -> &mut Filter {
+    pub fn pubkeys(&mut self, pubkeys: Vec<[u8; 32]>) -> &mut Filter {
         self.start_tag_field('p');
         for pk in pubkeys {
             self.add_id_element(pk);
@@ -148,10 +148,10 @@ impl Filter {
         self
     }
 
-    pub fn authors(&mut self, authors: Vec<&[u8; 32]>) -> &mut Filter {
+    pub fn authors(&mut self, authors: Vec<[u8; 32]>) -> &mut Filter {
         self.start_authors_field();
         for author in authors {
-            self.add_id_element(author);
+            self.add_id_element(&author);
         }
         self.end_field();
         self
@@ -166,7 +166,7 @@ impl Filter {
         self
     }
 
-    pub fn pubkey(&mut self, pubkeys: Vec<&[u8; 32]>) -> &mut Filter {
+    pub fn pubkey(&mut self, pubkeys: Vec<[u8; 32]>) -> &mut Filter {
         self.start_pubkeys_field();
         for pubkey in pubkeys {
             self.add_id_element(pubkey);
