@@ -291,8 +291,8 @@ pub const HAVE_CCAN: u32 = 1;
 pub const HAVE_UNALIGNED_ACCESS: u32 = 1;
 pub const HAVE_TYPEOF: u32 = 1;
 pub const HAVE_BIG_ENDIAN: u32 = 0;
-pub const HAVE_BYTESWAP_H: u32 = 1;
-pub const HAVE_BSWAP_64: u32 = 1;
+pub const HAVE_BYTESWAP_H: u32 = 0;
+pub const HAVE_BSWAP_64: u32 = 0;
 pub const HAVE_LITTLE_ENDIAN: u32 = 1;
 pub const __bool_true_false_are_defined: u32 = 1;
 pub const true_: u32 = 1;
@@ -2266,47 +2266,6 @@ fn bindgen_test_layout_cursor() {
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct array {
-    pub cur: cursor,
-    pub elem_size: ::std::os::raw::c_uint,
-}
-#[test]
-fn bindgen_test_layout_array() {
-    const UNINIT: ::std::mem::MaybeUninit<array> = ::std::mem::MaybeUninit::uninit();
-    let ptr = UNINIT.as_ptr();
-    assert_eq!(
-        ::std::mem::size_of::<array>(),
-        32usize,
-        concat!("Size of: ", stringify!(array))
-    );
-    assert_eq!(
-        ::std::mem::align_of::<array>(),
-        8usize,
-        concat!("Alignment of ", stringify!(array))
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).cur) as usize - ptr as usize },
-        0usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(array),
-            "::",
-            stringify!(cur)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).elem_size) as usize - ptr as usize },
-        24usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(array),
-            "::",
-            stringify!(elem_size)
-        )
-    );
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
 pub struct ndb_str_block {
     pub str_: *const ::std::os::raw::c_char,
     pub len: u32,
@@ -2346,6 +2305,7 @@ fn bindgen_test_layout_ndb_str_block() {
         )
     );
 }
+pub type str_block_t = ndb_str_block;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ndb_json_parser {
@@ -2390,6 +2350,156 @@ pub struct ndb_packed_str {
 #[derive(Debug, Copy, Clone)]
 pub struct bolt11 {
     _unused: [u8; 0],
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_tag_ptr {
+    pub ptr: *mut ndb_tag,
+}
+#[test]
+fn bindgen_test_layout_ndb_tag_ptr() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_tag_ptr> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_tag_ptr>(),
+        8usize,
+        concat!("Size of: ", stringify!(ndb_tag_ptr))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_tag_ptr>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_tag_ptr))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).ptr) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_tag_ptr),
+            "::",
+            stringify!(ptr)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_tags_ptr {
+    pub ptr: *mut ndb_tags,
+}
+#[test]
+fn bindgen_test_layout_ndb_tags_ptr() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_tags_ptr> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_tags_ptr>(),
+        8usize,
+        concat!("Size of: ", stringify!(ndb_tags_ptr))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_tags_ptr>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_tags_ptr))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).ptr) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_tags_ptr),
+            "::",
+            stringify!(ptr)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_block_ptr {
+    pub ptr: *mut ndb_block,
+}
+#[test]
+fn bindgen_test_layout_ndb_block_ptr() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_block_ptr> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_block_ptr>(),
+        8usize,
+        concat!("Size of: ", stringify!(ndb_block_ptr))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_block_ptr>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_block_ptr))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).ptr) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_block_ptr),
+            "::",
+            stringify!(ptr)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_blocks_ptr {
+    pub ptr: *mut ndb_blocks,
+}
+#[test]
+fn bindgen_test_layout_ndb_blocks_ptr() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_blocks_ptr> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_blocks_ptr>(),
+        8usize,
+        concat!("Size of: ", stringify!(ndb_blocks_ptr))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_blocks_ptr>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_blocks_ptr))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).ptr) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_blocks_ptr),
+            "::",
+            stringify!(ptr)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_note_ptr {
+    pub ptr: *mut ndb_note,
+}
+#[test]
+fn bindgen_test_layout_ndb_note_ptr() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_note_ptr> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_note_ptr>(),
+        8usize,
+        concat!("Size of: ", stringify!(ndb_note_ptr))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_note_ptr>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_note_ptr))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).ptr) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_ptr),
+            "::",
+            stringify!(ptr)
+        )
+    );
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -2723,6 +2833,7 @@ pub const tce_type_NDB_TCE_EVENT: tce_type = 1;
 pub const tce_type_NDB_TCE_OK: tce_type = 2;
 pub const tce_type_NDB_TCE_NOTICE: tce_type = 3;
 pub const tce_type_NDB_TCE_EOSE: tce_type = 4;
+pub const tce_type_NDB_TCE_AUTH: tce_type = 5;
 pub type tce_type = ::std::os::raw::c_uint;
 pub const ndb_ingest_filter_action_NDB_INGEST_REJECT: ndb_ingest_filter_action = 0;
 pub const ndb_ingest_filter_action_NDB_INGEST_ACCEPT: ndb_ingest_filter_action = 1;
@@ -2998,7 +3109,7 @@ pub type ndb_ingest_filter_fn = ::std::option::Option<
 pub const ndb_filter_fieldtype_NDB_FILTER_IDS: ndb_filter_fieldtype = 1;
 pub const ndb_filter_fieldtype_NDB_FILTER_AUTHORS: ndb_filter_fieldtype = 2;
 pub const ndb_filter_fieldtype_NDB_FILTER_KINDS: ndb_filter_fieldtype = 3;
-pub const ndb_filter_fieldtype_NDB_FILTER_GENERIC: ndb_filter_fieldtype = 4;
+pub const ndb_filter_fieldtype_NDB_FILTER_TAGS: ndb_filter_fieldtype = 4;
 pub const ndb_filter_fieldtype_NDB_FILTER_SINCE: ndb_filter_fieldtype = 5;
 pub const ndb_filter_fieldtype_NDB_FILTER_UNTIL: ndb_filter_fieldtype = 6;
 pub const ndb_filter_fieldtype_NDB_FILTER_LIMIT: ndb_filter_fieldtype = 7;
@@ -3021,7 +3132,8 @@ pub const ndb_dbs_NDB_DB_PROFILE_LAST_FETCH: ndb_dbs = 7;
 pub const ndb_dbs_NDB_DB_NOTE_KIND: ndb_dbs = 8;
 pub const ndb_dbs_NDB_DB_NOTE_TEXT: ndb_dbs = 9;
 pub const ndb_dbs_NDB_DB_NOTE_BLOCKS: ndb_dbs = 10;
-pub const ndb_dbs_NDB_DBS: ndb_dbs = 11;
+pub const ndb_dbs_NDB_DB_NOTE_TAGS: ndb_dbs = 11;
+pub const ndb_dbs_NDB_DBS: ndb_dbs = 12;
 pub type ndb_dbs = ::std::os::raw::c_uint;
 pub const ndb_common_kind_NDB_CKIND_PROFILE: ndb_common_kind = 0;
 pub const ndb_common_kind_NDB_CKIND_TEXT: ndb_common_kind = 1;
@@ -3234,7 +3346,7 @@ fn bindgen_test_layout_ndb_filter_element() {
 pub struct ndb_filter_field {
     pub type_: ndb_filter_fieldtype,
     pub elem_type: ndb_generic_element_type,
-    pub generic: ::std::os::raw::c_char,
+    pub tag: ::std::os::raw::c_char,
 }
 #[test]
 fn bindgen_test_layout_ndb_filter_field() {
@@ -3271,13 +3383,13 @@ fn bindgen_test_layout_ndb_filter_field() {
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).generic) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).tag) as usize - ptr as usize },
         8usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_filter_field),
             "::",
-            stringify!(generic)
+            stringify!(tag)
         )
     );
 }
@@ -3577,7 +3689,7 @@ fn bindgen_test_layout_ndb_stat_counts() {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ndb_stat {
-    pub dbs: [ndb_stat_counts; 11usize],
+    pub dbs: [ndb_stat_counts; 12usize],
     pub common_kinds: [ndb_stat_counts; 15usize],
     pub other_kinds: ndb_stat_counts,
 }
@@ -3587,7 +3699,7 @@ fn bindgen_test_layout_ndb_stat() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<ndb_stat>(),
-        648usize,
+        672usize,
         concat!("Size of: ", stringify!(ndb_stat))
     );
     assert_eq!(
@@ -3607,7 +3719,7 @@ fn bindgen_test_layout_ndb_stat() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).common_kinds) as usize - ptr as usize },
-        264usize,
+        288usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_stat),
@@ -3617,7 +3729,7 @@ fn bindgen_test_layout_ndb_stat() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).other_kinds) as usize - ptr as usize },
-        624usize,
+        648usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_stat),
@@ -4569,6 +4681,77 @@ fn bindgen_test_layout_ndb_block_iterator() {
         )
     );
 }
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_query_result {
+    pub note: *mut ndb_note,
+    pub note_id: u64,
+}
+#[test]
+fn bindgen_test_layout_ndb_query_result() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_query_result> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_query_result>(),
+        16usize,
+        concat!("Size of: ", stringify!(ndb_query_result))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_query_result>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_query_result))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).note) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_result),
+            "::",
+            stringify!(note)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).note_id) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_result),
+            "::",
+            stringify!(note_id)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_query_results {
+    pub cur: cursor,
+}
+#[test]
+fn bindgen_test_layout_ndb_query_results() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_query_results> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_query_results>(),
+        24usize,
+        concat!("Size of: ", stringify!(ndb_query_results))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_query_results>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_query_results))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).cur) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_results),
+            "::",
+            stringify!(cur)
+        )
+    );
+}
 extern "C" {
     pub fn ndb_default_config(arg1: *mut ndb_config);
 }
@@ -4844,7 +5027,7 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
-    pub fn ndb_filter_start_generic_field(
+    pub fn ndb_filter_start_tag_field(
         arg1: *mut ndb_filter,
         tag: ::std::os::raw::c_char,
     ) -> ::std::os::raw::c_int;
@@ -4859,7 +5042,33 @@ extern "C" {
     pub fn ndb_filter_end_field(arg1: *mut ndb_filter);
 }
 extern "C" {
-    pub fn ndb_filter_free(arg1: *mut ndb_filter);
+    pub fn ndb_filter_destroy(arg1: *mut ndb_filter);
+}
+extern "C" {
+    pub fn ndb_subscribe(
+        arg1: *mut ndb,
+        arg2: *mut ndb_filter,
+        num_filters: ::std::os::raw::c_int,
+    ) -> u64;
+}
+extern "C" {
+    pub fn ndb_wait_for_notes(
+        arg1: *mut ndb,
+        subid: u64,
+        note_ids: *mut u64,
+        note_id_capacity: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_poll_for_notes(
+        arg1: *mut ndb,
+        subid: u64,
+        note_ids: *mut u64,
+        note_id_capacity: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_unsubscribe(subid: ::std::os::raw::c_int) -> ::std::os::raw::c_int;
 }
 extern "C" {
     pub fn ndb_text_search(
@@ -4883,6 +5092,16 @@ extern "C" {
         arg1: *mut ndb_text_search_config,
         limit: ::std::os::raw::c_int,
     );
+}
+extern "C" {
+    pub fn ndb_query(
+        txn: *mut ndb_txn,
+        filters: *mut ndb_filter,
+        num_filters: ::std::os::raw::c_int,
+        results: *mut ndb_query_result,
+        result_capacity: ::std::os::raw::c_int,
+        count: *mut ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
 }
 extern "C" {
     pub fn ndb_stat(ndb: *mut ndb, stat: *mut ndb_stat) -> ::std::os::raw::c_int;
@@ -4919,6 +5138,9 @@ extern "C" {
 }
 extern "C" {
     pub fn ndb_note_tags(note: *mut ndb_note) -> *mut ndb_tags;
+}
+extern "C" {
+    pub fn ndb_str_len(str_: *mut ndb_str) -> ::std::os::raw::c_int;
 }
 extern "C" {
     pub fn ndb_tags_iterate_start(note: *mut ndb_note, iter: *mut ndb_iterator);
@@ -4961,10 +5183,16 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
-    pub fn ndb_block_type(blocks: *mut ndb_blocks) -> ndb_block_type;
+    pub fn ndb_get_block_type(block: *mut ndb_block) -> ndb_block_type;
+}
+extern "C" {
+    pub fn ndb_blocks_flags(block: *mut ndb_blocks) -> ::std::os::raw::c_int;
 }
 extern "C" {
     pub fn ndb_blocks_total_size(blocks: *mut ndb_blocks) -> usize;
+}
+extern "C" {
+    pub fn ndb_blocks_word_count(blocks: *mut ndb_blocks) -> ::std::os::raw::c_int;
 }
 extern "C" {
     #[doc = " Free blocks if they are owned, safe to call on unowned blocks as well."]
@@ -4986,9 +5214,6 @@ extern "C" {
 }
 extern "C" {
     pub fn ndb_blocks_iterate_next(arg1: *mut ndb_block_iterator) -> *mut ndb_block;
-}
-extern "C" {
-    pub fn ndb_get_block_type(block: *mut ndb_block) -> ndb_block_type;
 }
 extern "C" {
     pub fn ndb_block_str(arg1: *mut ndb_block) -> *mut ndb_str_block;
