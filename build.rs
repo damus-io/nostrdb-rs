@@ -78,6 +78,10 @@ fn main() {
     //.flag("-Werror")
     //.flag("-g")
 
+    if env::var("PROFILE").unwrap() == "debug" {
+        build.flag("-DDEBUG");
+    }
+
     build.compile("libnostrdb.a");
 
     secp256k1_build();
