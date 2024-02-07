@@ -1,4 +1,5 @@
 use crate::bindings;
+use crate::Note;
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::ptr::null_mut;
@@ -74,44 +75,49 @@ impl Filter {
         };
     }
 
-    fn start_kind_field(&self) {
-        unsafe {
-            bindings::ndb_filter_start_field(
-                self.as_mut_ptr(),
-                bindings::ndb_filter_fieldtype_NDB_FILTER_KINDS,
-            )
-        };
+    fn start_field(&self, field: bindings::ndb_filter_fieldtype) {
+        unsafe { bindings::ndb_filter_start_field(self.as_mut_ptr(), field) };
+    }
+
+    fn start_tags_field(&self, tag: char) {
+        unsafe { bindings::ndb_filter_start_tag_field(self.as_mut_ptr(), tag as i8) };
+    }
+
+    fn start_kinds_field(&self) {
+        self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_KINDS);
+    }
+
+    fn start_authors_field(&self) {
+        self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_AUTHORS);
+    }
+
+    fn start_events_field(&self) {
+        self.start_tags_field('e');
+    }
+
+    fn start_pubkeys_field(&self) {
+        self.start_tags_field('p');
     }
 
     fn end_field(&self) {
         unsafe { bindings::ndb_filter_end_field(self.as_mut_ptr()) }
     }
 
-    pub fn authors(self, authors: Vec<[u8; 32]>) -> Filter {
-        unsafe {
-            bindings::ndb_filter_start_field(
-                self.as_mut_ptr(),
-                bindings::ndb_filter_fieldtype_NDB_FILTER_AUTHORS,
-            );
-        };
-
+    pub fn authors<'a>(self, authors: Vec<&'a [u8; 32]>) -> Filter {
+        self.start_authors_field();
         for author in authors {
-            self.add_id_element(&author);
+            self.add_id_element(author);
         }
-
         self.end_field();
-
         self
     }
 
     fn start_tag_field(&self, tag: char) {
-        unsafe {
-            bindings::ndb_filter_start_tag_field(self.as_mut_ptr(), tag as u8 as c_char);
-        }
+        unsafe { bindings::ndb_filter_start_tag_field(self.as_mut_ptr(), tag as u8 as c_char) };
     }
 
     pub fn kinds(self, kinds: Vec<u64>) -> Filter {
-        self.start_kind_field();
+        self.start_kinds_field();
         for kind in kinds {
             self.add_int_element(kind);
         }
@@ -119,13 +125,26 @@ impl Filter {
         self
     }
 
-    pub fn hashtags(self, tags: Vec<String>) -> Filter {
-        self.start_tag_field('t');
+    pub fn pubkey<'a>(self, pubkeys: Vec<&'a [u8; 32]>) -> Filter {
+        self.start_pubkeys_field();
+        for pubkey in pubkeys {
+            self.add_id_element(pubkey);
+        }
+        self.end_field();
+        self
+    }
+
+    pub fn tags(self, tags: Vec<String>, tag: char) -> Filter {
+        self.start_tag_field(tag);
         for tag in tags {
             self.add_str_element(&tag);
         }
         self.end_field();
         self
+    }
+
+    pub fn matches(&self, note: &Note) -> bool {
+        unsafe { bindings::ndb_filter_matches(self.as_mut_ptr(), note.as_ptr()) != 0 }
     }
 }
 

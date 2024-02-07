@@ -311,6 +311,7 @@ mod tests {
     #[test]
     fn note_blocks_work() {
         let db = "target/testdbs/note_blocks";
+        test_util::cleanup_db(&db);
 
         {
             let ndb = Ndb::new(db, &Config::new()).expect("ndb");
