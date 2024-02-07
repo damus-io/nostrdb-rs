@@ -80,7 +80,7 @@ impl Ndb {
         Ok(())
     }
 
-    pub fn subscribe(&self, filter: Filter) -> Result<u64> {
+    pub fn subscribe(&self, filter: &Filter) -> Result<u64> {
         unsafe {
             let res = bindings::ndb_subscribe(self.as_ptr(), filter.as_mut_ptr(), 1);
             if res == 0 {
