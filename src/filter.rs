@@ -1,8 +1,10 @@
 use crate::bindings;
 use crate::Note;
 use std::ffi::CString;
+use std::marker::PhantomPinned;
 use std::os::raw::c_char;
 use std::ptr::null_mut;
+use tracing::debug;
 
 #[derive(Debug)]
 pub struct Filter {
@@ -17,7 +19,7 @@ impl bindings::ndb_filter {
 
 impl Filter {
     pub fn new() -> Filter {
-        let null = std::ptr::null_mut();
+        let null = null_mut();
         let mut filter_data = bindings::ndb_filter {
             elem_buf: bindings::cursor {
                 start: null,
@@ -30,7 +32,7 @@ impl Filter {
                 end: null,
             },
             num_elements: 0,
-            current: std::ptr::null_mut(),
+            current: null_mut(),
             elements: [
                 null_mut(),
                 null_mut(),
@@ -115,7 +117,7 @@ impl Filter {
         unsafe { bindings::ndb_filter_end_field(self.as_mut_ptr()) }
     }
 
-    pub fn authors<'a>(self, authors: Vec<&'a [u8; 32]>) -> Filter {
+    pub fn authors(self, authors: Vec<&[u8; 32]>) -> Filter {
         self.start_authors_field();
         for author in authors {
             self.add_id_element(author);
@@ -170,8 +172,12 @@ impl Filter {
     }
 }
 
+/*
+// This is unsafe.. but we still need a way to free the memory on these
 impl Drop for Filter {
     fn drop(&mut self) {
+        debug!("dropping filter {:?}", self);
         unsafe { bindings::ndb_filter_destroy(self.as_mut_ptr()) };
     }
 }
+*/
