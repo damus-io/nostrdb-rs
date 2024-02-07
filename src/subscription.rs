@@ -1,6 +1,6 @@
 use crate::Filter;
 
 pub struct Subscription {
-    pub filter: Filter,
+    pub filters: Vec<Filter>,
     pub id: u64,
 }

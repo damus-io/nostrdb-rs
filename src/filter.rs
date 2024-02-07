@@ -8,7 +8,7 @@ use tracing::debug;
 
 #[derive(Debug)]
 pub struct Filter {
-    data: bindings::ndb_filter,
+    pub data: bindings::ndb_filter,
 }
 
 impl bindings::ndb_filter {
