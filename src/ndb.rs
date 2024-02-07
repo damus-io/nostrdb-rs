@@ -2,8 +2,9 @@ use libc;
 use std::ffi::CString;
 use std::ptr;
 
-use crate::bindings;
-use crate::{Blocks, Config, Error, Filter, Note, ProfileRecord, Result, Transaction};
+use crate::{
+    bindings, Blocks, Config, Error, Filter, Note, ProfileRecord, Result, Subscription, Transaction,
+};
 use std::fs;
 use std::os::raw::c_int;
 use std::path::Path;
@@ -80,20 +81,21 @@ impl Ndb {
         Ok(())
     }
 
-    pub fn subscribe(&self, filter: &Filter) -> Result<u64> {
+    pub fn subscribe<'a>(&self, filter: &'a Filter) -> Result<Subscription<'a>> {
         unsafe {
-            let res = bindings::ndb_subscribe(self.as_ptr(), filter.as_mut_ptr(), 1);
-            if res == 0 {
+            let id = bindings::ndb_subscribe(self.as_ptr(), filter.as_mut_ptr(), 1);
+            if id == 0 {
                 Err(Error::SubscriptionError)
             } else {
-                Ok(res)
+                Ok(Subscription { filter, id })
             }
         }
     }
 
-    pub fn poll_for_notes(&self, sub_id: u64, max_notes: u32) -> Vec<u64> {
+    pub fn poll_for_notes<'a>(&self, sub: &Subscription<'a>, max_notes: u32) -> Vec<u64> {
         let mut vec = vec![];
         vec.reserve_exact(max_notes as usize);
+        let sub_id = sub.id;
 
         let res = unsafe {
             let res = bindings::ndb_poll_for_notes(
@@ -108,8 +110,13 @@ impl Ndb {
         vec
     }
 
-    pub async fn wait_for_notes(&self, sub_id: u64, max_notes: u32) -> Result<Vec<u64>> {
+    pub async fn wait_for_notes<'a>(
+        &self,
+        sub: &Subscription<'a>,
+        max_notes: u32,
+    ) -> Result<Vec<u64>> {
         let ndb = self.clone();
+        let sub_id = sub.id;
         let handle = task::spawn_blocking(move || {
             let mut vec = vec![];
             vec.reserve_exact(max_notes as usize);
@@ -253,8 +260,8 @@ mod tests {
         {
             let ndb = Ndb::new(db, &Config::new()).expect("ndb");
             let filter = Filter::new().kinds(vec![1]);
-            let sub_id = ndb.subscribe(&filter).expect("sub_id");
-            let waiter = ndb.wait_for_notes(sub_id, 1);
+            let sub = ndb.subscribe(&filter).expect("sub_id");
+            let waiter = ndb.wait_for_notes(&sub, 1);
             ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
             let res = waiter.await.expect("await ok");
             assert_eq!(res, vec![1]);
@@ -269,15 +276,15 @@ mod tests {
         {
             let ndb = Ndb::new(db, &Config::new()).expect("ndb");
             let filter = Filter::new().kinds(vec![1]);
-            let sub_id = ndb.subscribe(&filter).expect("sub_id");
+            let sub = ndb.subscribe(&filter).expect("sub_id");
             ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
             // this is too fast, we should have nothing
-            let res = ndb.poll_for_notes(sub_id, 1);
+            let res = ndb.poll_for_notes(&sub, 1);
             assert_eq!(res, vec![]);
 
             std::thread::sleep(std::time::Duration::from_millis(100));
             // now we should have something
-            let res = ndb.poll_for_notes(sub_id, 1);
+            let res = ndb.poll_for_notes(&sub, 1);
             assert_eq!(res, vec![1]);
         }
     }

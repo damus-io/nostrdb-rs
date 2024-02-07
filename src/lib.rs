@@ -16,6 +16,7 @@ mod ndb;
 mod note;
 mod profile;
 mod result;
+mod subscription;
 mod transaction;
 
 pub use block::{Block, BlockType, Blocks, Mention};
@@ -26,6 +27,7 @@ pub use ndb::Ndb;
 pub use note::Note;
 pub use profile::ProfileRecord;
 pub use result::Result;
+pub use subscription::Subscription;
 pub use transaction::Transaction;
 
 mod test_util;

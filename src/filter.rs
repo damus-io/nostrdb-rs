@@ -107,6 +107,10 @@ impl Filter {
         self.start_tags_field('p');
     }
 
+    fn start_tag_field(&self, tag: char) {
+        unsafe { bindings::ndb_filter_start_tag_field(self.as_mut_ptr(), tag as u8 as c_char) };
+    }
+
     fn end_field(&self) {
         unsafe { bindings::ndb_filter_end_field(self.as_mut_ptr()) }
     }
@@ -118,10 +122,6 @@ impl Filter {
         }
         self.end_field();
         self
-    }
-
-    fn start_tag_field(&self, tag: char) {
-        unsafe { bindings::ndb_filter_start_tag_field(self.as_mut_ptr(), tag as u8 as c_char) };
     }
 
     pub fn kinds(self, kinds: Vec<u64>) -> Filter {
