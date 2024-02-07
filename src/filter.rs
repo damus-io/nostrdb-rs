@@ -91,6 +91,14 @@ impl Filter {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_AUTHORS);
     }
 
+    fn start_since_field(&self) {
+        self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_SINCE);
+    }
+
+    fn start_limit_field(&self) {
+        self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_LIMIT);
+    }
+
     fn start_events_field(&self) {
         self.start_tags_field('e');
     }
@@ -139,6 +147,20 @@ impl Filter {
         for tag in tags {
             self.add_str_element(&tag);
         }
+        self.end_field();
+        self
+    }
+
+    pub fn since(self, since: u64) -> Filter {
+        self.start_since_field();
+        self.add_int_element(since);
+        self.end_field();
+        self
+    }
+
+    pub fn limit(self, limit: u64) -> Filter {
+        self.start_since_field();
+        self.add_int_element(limit);
         self.end_field();
         self
     }
