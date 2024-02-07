@@ -101,6 +101,10 @@ impl Filter {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_LIMIT);
     }
 
+    fn start_ids_field(&self) {
+        self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_IDS);
+    }
+
     fn start_events_field(&self) {
         self.start_tags_field('e');
     }
@@ -115,6 +119,33 @@ impl Filter {
 
     fn end_field(&self) {
         unsafe { bindings::ndb_filter_end_field(self.as_mut_ptr()) }
+    }
+
+    pub fn events(self, events: Vec<&[u8; 32]>) -> Filter {
+        self.start_tag_field('e');
+        for id in events {
+            self.add_id_element(id);
+        }
+        self.end_field();
+        self
+    }
+
+    pub fn ids(self, ids: Vec<&[u8; 32]>) -> Filter {
+        self.start_ids_field();
+        for id in ids {
+            self.add_id_element(id);
+        }
+        self.end_field();
+        self
+    }
+
+    pub fn pubkeys(self, pubkeys: Vec<&[u8; 32]>) -> Filter {
+        self.start_tag_field('p');
+        for pk in pubkeys {
+            self.add_id_element(pk);
+        }
+        self.end_field();
+        self
     }
 
     pub fn authors(self, authors: Vec<&[u8; 32]>) -> Filter {
