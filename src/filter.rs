@@ -121,7 +121,7 @@ impl Filter {
         unsafe { bindings::ndb_filter_end_field(self.as_mut_ptr()) }
     }
 
-    pub fn events(self, events: Vec<&[u8; 32]>) -> Filter {
+    pub fn events(&mut self, events: Vec<&[u8; 32]>) -> &mut Filter {
         self.start_tag_field('e');
         for id in events {
             self.add_id_element(id);
@@ -130,7 +130,7 @@ impl Filter {
         self
     }
 
-    pub fn ids(self, ids: Vec<&[u8; 32]>) -> Filter {
+    pub fn ids(&mut self, ids: Vec<&[u8; 32]>) -> &mut Filter {
         self.start_ids_field();
         for id in ids {
             self.add_id_element(id);
@@ -139,7 +139,7 @@ impl Filter {
         self
     }
 
-    pub fn pubkeys(self, pubkeys: Vec<&[u8; 32]>) -> Filter {
+    pub fn pubkeys(&mut self, pubkeys: Vec<&[u8; 32]>) -> &mut Filter {
         self.start_tag_field('p');
         for pk in pubkeys {
             self.add_id_element(pk);
@@ -148,7 +148,7 @@ impl Filter {
         self
     }
 
-    pub fn authors(self, authors: Vec<&[u8; 32]>) -> Filter {
+    pub fn authors(&mut self, authors: Vec<&[u8; 32]>) -> &mut Filter {
         self.start_authors_field();
         for author in authors {
             self.add_id_element(author);
@@ -157,7 +157,7 @@ impl Filter {
         self
     }
 
-    pub fn kinds(self, kinds: Vec<u64>) -> Filter {
+    pub fn kinds(&mut self, kinds: Vec<u64>) -> &mut Filter {
         self.start_kinds_field();
         for kind in kinds {
             self.add_int_element(kind);
@@ -166,7 +166,7 @@ impl Filter {
         self
     }
 
-    pub fn pubkey<'a>(self, pubkeys: Vec<&'a [u8; 32]>) -> Filter {
+    pub fn pubkey(&mut self, pubkeys: Vec<&[u8; 32]>) -> &mut Filter {
         self.start_pubkeys_field();
         for pubkey in pubkeys {
             self.add_id_element(pubkey);
@@ -175,7 +175,7 @@ impl Filter {
         self
     }
 
-    pub fn tags(self, tags: Vec<String>, tag: char) -> Filter {
+    pub fn tags(&mut self, tags: Vec<String>, tag: char) -> &mut Filter {
         self.start_tag_field(tag);
         for tag in tags {
             self.add_str_element(&tag);
@@ -184,14 +184,14 @@ impl Filter {
         self
     }
 
-    pub fn since(self, since: u64) -> Filter {
+    pub fn since(&mut self, since: u64) -> &mut Filter {
         self.start_since_field();
         self.add_int_element(since);
         self.end_field();
         self
     }
 
-    pub fn limit(self, limit: u64) -> Filter {
+    pub fn limit(&mut self, limit: u64) -> &mut Filter {
         self.start_since_field();
         self.add_int_element(limit);
         self.end_field();
