@@ -224,9 +224,14 @@ impl Ndb {
         Ok(res)
     }
 
-    pub fn get_blocks_by_key<'a>(&self, txn: &'a Transaction, note_key: u64) -> Result<Blocks<'a>> {
-        let blocks_ptr =
-            unsafe { bindings::ndb_get_blocks_by_key(self.as_ptr(), txn.as_mut_ptr(), note_key) };
+    pub fn get_blocks_by_key<'a>(
+        &self,
+        txn: &'a Transaction,
+        note_key: NoteKey,
+    ) -> Result<Blocks<'a>> {
+        let blocks_ptr = unsafe {
+            bindings::ndb_get_blocks_by_key(self.as_ptr(), txn.as_mut_ptr(), note_key.as_u64())
+        };
 
         if blocks_ptr.is_null() {
             return Err(Error::NotFound);
