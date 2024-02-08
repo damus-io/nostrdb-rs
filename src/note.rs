@@ -66,6 +66,13 @@ impl<'a> Note<'a> {
         }
     }
 
+    pub fn txn(&'a self) -> Option<&'a Transaction> {
+        match self {
+            Note::Transactional { transaction, .. } => Some(transaction),
+            _ => None,
+        }
+    }
+
     pub fn key(&self) -> Option<NoteKey> {
         match self {
             Note::Transactional { key, .. } => Some(NoteKey::new(key.as_u64())),
