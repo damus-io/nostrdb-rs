@@ -1,5 +1,6 @@
 use crate::{bindings, Note, Transaction};
 
+#[derive(Debug)]
 pub struct QueryResult<'a> {
     pub note: Note<'a>,
     pub note_size: u64,
