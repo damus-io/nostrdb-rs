@@ -3,7 +3,8 @@ use std::ffi::CString;
 use std::ptr;
 
 use crate::{
-    bindings, Blocks, Config, Error, Filter, Note, ProfileRecord, Result, Subscription, Transaction,
+    bindings, Blocks, Config, Error, Filter, Note, ProfileRecord, QueryResult, Result,
+    Subscription, Transaction,
 };
 use std::fs;
 use std::os::raw::c_int;
@@ -81,6 +82,36 @@ impl Ndb {
         Ok(())
     }
 
+    pub fn query<'a>(
+        &self,
+        txn: &'a Transaction,
+        filters: Vec<Filter>,
+        max_results: i32,
+    ) -> Result<Vec<QueryResult<'a>>> {
+        let mut ndb_filters: Vec<bindings::ndb_filter> = filters.iter().map(|a| a.data).collect();
+        let mut out: Vec<bindings::ndb_query_result> = vec![];
+        let mut returned: i32 = 0;
+        out.reserve_exact(max_results as usize);
+        let res = unsafe {
+            bindings::ndb_query(
+                txn.as_mut_ptr(),
+                ndb_filters.as_mut_ptr(),
+                ndb_filters.len() as i32,
+                out.as_mut_ptr(),
+                max_results,
+                &mut returned as *mut i32,
+            )
+        };
+        if res == 1 {
+            unsafe {
+                out.set_len(returned as usize);
+            };
+            Ok(out.iter().map(|r| QueryResult::new(r, txn)).collect())
+        } else {
+            Err(Error::QueryError)
+        }
+    }
+
     pub fn subscribe(&self, filters: Vec<Filter>) -> Result<Subscription> {
         unsafe {
             let mut ndb_filters: Vec<bindings::ndb_filter> =
@@ -103,7 +134,7 @@ impl Ndb {
         vec.reserve_exact(max_notes as usize);
         let sub_id = sub.id;
 
-        let res = unsafe {
+        unsafe {
             let res = bindings::ndb_poll_for_notes(
                 self.as_ptr(),
                 sub_id,
@@ -255,10 +286,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn query_works() {
+        let db = "target/testdbs/query";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+
+            let mut filter = Filter::new();
+            filter.kinds(vec![1]);
+
+            let filters = vec![filter];
+            let sub = ndb.subscribe(filters.clone()).expect("sub_id");
+            let waiter = ndb.wait_for_notes(&sub, 1);
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+            let res = waiter.await.expect("await ok");
+            assert_eq!(res, vec![1]);
+            let txn = Transaction::new(&ndb).expect("txn");
+            let res = ndb.query(&txn, filters, 1).expect("query ok");
+            assert_eq!(res.len(), 1);
+            assert_eq!(
+                hex::encode(res[0].note.id()),
+                "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn subscribe_event_works() {
         let db = "target/testdbs/subscribe";
         test_util::cleanup_db(&db);
-        tracing_subscriber::fmt::init();
 
         {
             let ndb = Ndb::new(db, &Config::new()).expect("ndb");

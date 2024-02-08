@@ -5,6 +5,7 @@ pub enum Error {
     DbOpenFailed,
     NotFound,
     DecodeError,
+    QueryError,
     NoteProcessFailed,
     TransactionFailed,
     SubscriptionError,
@@ -15,6 +16,7 @@ impl fmt::Display for Error {
         let s = match self {
             Error::DbOpenFailed => "Open failed",
             Error::NotFound => "Not found",
+            Error::QueryError => "Query failed",
             Error::DecodeError => "Decode error",
             Error::NoteProcessFailed => "Note process failed",
             Error::TransactionFailed => "Transaction failed",

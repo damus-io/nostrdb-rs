@@ -1,12 +1,11 @@
 use crate::bindings;
 use crate::Note;
 use std::ffi::CString;
-use std::marker::PhantomPinned;
 use std::os::raw::c_char;
 use std::ptr::null_mut;
 use tracing::debug;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Filter {
     pub data: bindings::ndb_filter,
 }
