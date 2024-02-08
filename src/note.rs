@@ -1,6 +1,19 @@
 use crate::bindings;
 use crate::transaction::Transaction;
 
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct NoteKey(u64);
+
+impl NoteKey {
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+
+    pub fn new(key: u64) -> Self {
+        NoteKey(key)
+    }
+}
+
 #[derive(Debug)]
 pub enum Note<'a> {
     /// A note in-memory outside of nostrdb. This note is a pointer to a note in
@@ -19,7 +32,7 @@ pub enum Note<'a> {
     Transactional {
         ptr: *mut bindings::ndb_note,
         size: usize,
-        key: u64,
+        key: NoteKey,
         transaction: &'a Transaction,
     },
 }
@@ -42,7 +55,7 @@ impl<'a> Note<'a> {
     pub(crate) fn new_transactional(
         ptr: *mut bindings::ndb_note,
         size: usize,
-        key: u64,
+        key: NoteKey,
         transaction: &'a Transaction,
     ) -> Note<'a> {
         Note::Transactional {
@@ -53,9 +66,9 @@ impl<'a> Note<'a> {
         }
     }
 
-    pub fn key(&self) -> Option<u64> {
+    pub fn key(&self) -> Option<NoteKey> {
         match self {
-            Note::Transactional { key, .. } => Some(*key),
+            Note::Transactional { key, .. } => Some(NoteKey::new(key.as_u64())),
             _ => None,
         }
     }

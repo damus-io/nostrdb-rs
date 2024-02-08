@@ -3,7 +3,6 @@ use crate::Note;
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::ptr::null_mut;
-use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct Filter {

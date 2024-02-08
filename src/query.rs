@@ -1,10 +1,10 @@
-use crate::{bindings, Note, Transaction};
+use crate::{bindings, Note, NoteKey, Transaction};
 
 #[derive(Debug)]
 pub struct QueryResult<'a> {
     pub note: Note<'a>,
     pub note_size: u64,
-    pub note_key: u64,
+    pub note_key: NoteKey,
 }
 
 impl<'a> QueryResult<'a> {
@@ -13,11 +13,11 @@ impl<'a> QueryResult<'a> {
             note: Note::new_transactional(
                 result.note,
                 result.note_size as usize,
-                result.note_id,
+                NoteKey::new(result.note_id),
                 txn,
             ),
             note_size: result.note_size,
-            note_key: result.note_id,
+            note_key: NoteKey::new(result.note_id),
         }
     }
 }

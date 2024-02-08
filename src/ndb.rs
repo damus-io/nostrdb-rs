@@ -3,7 +3,7 @@ use std::ffi::CString;
 use std::ptr;
 
 use crate::{
-    bindings, Blocks, Config, Error, Filter, Note, ProfileRecord, QueryResult, Result,
+    bindings, Blocks, Config, Error, Filter, Note, NoteKey, ProfileRecord, QueryResult, Result,
     Subscription, Transaction,
 };
 use std::fs;
@@ -235,6 +235,31 @@ impl Ndb {
         Ok(Blocks::new_transactional(blocks_ptr, txn))
     }
 
+    pub fn get_note_by_key<'a>(
+        &self,
+        transaction: &'a Transaction,
+        note_key: NoteKey,
+    ) -> Result<Note<'a>> {
+        let mut len: usize = 0;
+
+        let note_ptr = unsafe {
+            bindings::ndb_get_note_by_key(transaction.as_mut_ptr(), note_key.as_u64(), &mut len)
+        };
+
+        if note_ptr.is_null() {
+            // Handle null pointer (e.g., note not found or error occurred)
+            return Err(Error::NotFound);
+        }
+
+        // Convert the raw pointer to a Note instance
+        Ok(Note::new_transactional(
+            note_ptr,
+            len,
+            note_key,
+            transaction,
+        ))
+    }
+
     /// Get a note from the database. Takes a [Transaction] and a 32-byte [Note] Id
     pub fn get_note_by_id<'a>(
         &self,
@@ -246,7 +271,7 @@ impl Ndb {
 
         let note_ptr = unsafe {
             bindings::ndb_get_note_by_id(
-                transaction.as_ptr() as *mut bindings::ndb_txn,
+                transaction.as_mut_ptr(),
                 id.as_ptr(),
                 &mut len,
                 &mut primkey,
@@ -259,7 +284,12 @@ impl Ndb {
         }
 
         // Convert the raw pointer to a Note instance
-        Ok(Note::new_transactional(note_ptr, len, primkey, transaction))
+        Ok(Note::new_transactional(
+            note_ptr,
+            len,
+            NoteKey::new(primkey),
+            transaction,
+        ))
     }
 
     /// Get the underlying pointer to the context in C
