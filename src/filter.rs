@@ -3,22 +3,46 @@ use crate::Note;
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::ptr::null_mut;
+use tracing::debug;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+pub struct FilterBuilder {
+    pub data: bindings::ndb_filter,
+}
+
+#[derive(Debug)]
 pub struct Filter {
     pub data: bindings::ndb_filter,
+}
+
+impl Clone for Filter {
+    fn clone(&self) -> Self {
+        let mut new_filter: bindings::ndb_filter = Default::default();
+        unsafe {
+            bindings::ndb_filter_clone(
+                new_filter.as_mut_ptr(),
+                self.as_ptr() as *mut bindings::ndb_filter,
+            );
+        };
+        Filter { data: new_filter }
+    }
 }
 
 impl bindings::ndb_filter {
     fn as_ptr(&self) -> *const bindings::ndb_filter {
         self as *const bindings::ndb_filter
     }
+
+    fn as_mut_ptr(&mut self) -> *mut bindings::ndb_filter {
+        self as *mut bindings::ndb_filter
+    }
 }
 
-impl Filter {
-    pub fn new() -> Filter {
+impl Default for bindings::ndb_filter {
+    fn default() -> Self {
         let null = null_mut();
         let mut filter_data = bindings::ndb_filter {
+            finalized: 0,
             elem_buf: bindings::cursor {
                 start: null,
                 p: null,
@@ -30,96 +54,119 @@ impl Filter {
                 end: null,
             },
             num_elements: 0,
-            current: null_mut(),
-            elements: [
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                null_mut(),
-                null_mut(),
-            ],
+            current: -1,
+            elements: [0, 0, 0, 0, 0, 0, 0],
         };
 
         unsafe {
-            bindings::ndb_filter_init(&mut filter_data as *mut bindings::ndb_filter);
+            bindings::ndb_filter_init(filter_data.as_mut_ptr());
         };
 
-        Self { data: filter_data }
+        filter_data
+    }
+}
+
+impl Filter {
+    pub fn new() -> FilterBuilder {
+        FilterBuilder {
+            data: Default::default(),
+        }
+    }
+
+    pub fn matches(&self, note: &Note) -> bool {
+        unsafe {
+            bindings::ndb_filter_matches(self.as_ptr() as *mut bindings::ndb_filter, note.as_ptr())
+                != 0
+        }
     }
 
     pub fn as_ptr(&self) -> *const bindings::ndb_filter {
         return self.data.as_ptr();
     }
 
-    pub fn as_mut_ptr(&self) -> *mut bindings::ndb_filter {
-        return self.data.as_ptr() as *mut bindings::ndb_filter;
+    pub fn as_mut_ptr(&mut self) -> *mut bindings::ndb_filter {
+        return self.data.as_mut_ptr() as *mut bindings::ndb_filter;
+    }
+}
+
+impl FilterBuilder {
+    pub fn new() -> FilterBuilder {
+        Self {
+            data: Default::default(),
+        }
     }
 
-    fn add_int_element(&self, i: u64) {
+    pub fn as_ptr(&self) -> *const bindings::ndb_filter {
+        return self.data.as_ptr();
+    }
+
+    pub fn as_mut_ptr(&mut self) -> *mut bindings::ndb_filter {
+        return self.data.as_mut_ptr();
+    }
+
+    fn add_int_element(&mut self, i: u64) {
         unsafe { bindings::ndb_filter_add_int_element(self.as_mut_ptr(), i) };
     }
 
-    fn add_str_element(&self, s: &str) {
+    fn add_str_element(&mut self, s: &str) {
         let c_str = CString::new(s).expect("string to cstring conversion failed");
         unsafe {
             bindings::ndb_filter_add_str_element(self.as_mut_ptr(), c_str.as_ptr());
         };
     }
 
-    fn add_id_element(&self, id: &[u8; 32]) {
+    fn add_id_element(&mut self, id: &[u8; 32]) {
         let ptr: *const ::std::os::raw::c_uchar = id.as_ptr() as *const ::std::os::raw::c_uchar;
         unsafe {
             bindings::ndb_filter_add_id_element(self.as_mut_ptr(), ptr);
         };
     }
 
-    fn start_field(&self, field: bindings::ndb_filter_fieldtype) {
+    fn start_field(&mut self, field: bindings::ndb_filter_fieldtype) {
         unsafe { bindings::ndb_filter_start_field(self.as_mut_ptr(), field) };
     }
 
-    fn start_tags_field(&self, tag: char) {
+    fn start_tags_field(&mut self, tag: char) {
         unsafe { bindings::ndb_filter_start_tag_field(self.as_mut_ptr(), tag as i8) };
     }
 
-    fn start_kinds_field(&self) {
+    fn start_kinds_field(&mut self) {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_KINDS);
     }
 
-    fn start_authors_field(&self) {
+    fn start_authors_field(&mut self) {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_AUTHORS);
     }
 
-    fn start_since_field(&self) {
+    fn start_since_field(&mut self) {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_SINCE);
     }
 
-    fn start_limit_field(&self) {
+    fn start_limit_field(&mut self) {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_LIMIT);
     }
 
-    fn start_ids_field(&self) {
+    fn start_ids_field(&mut self) {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_IDS);
     }
 
-    fn start_events_field(&self) {
+    fn start_events_field(&mut self) {
         self.start_tags_field('e');
     }
 
-    fn start_pubkeys_field(&self) {
+    fn start_pubkeys_field(&mut self) {
         self.start_tags_field('p');
     }
 
-    fn start_tag_field(&self, tag: char) {
+    fn start_tag_field(&mut self, tag: char) {
         unsafe { bindings::ndb_filter_start_tag_field(self.as_mut_ptr(), tag as u8 as c_char) };
     }
 
-    fn end_field(&self) {
+    fn end_field(&mut self) {
         unsafe { bindings::ndb_filter_end_field(self.as_mut_ptr()) }
     }
 
-    pub fn events(&mut self, events: Vec<[u8; 32]>) -> &mut Filter {
+    pub fn events(&mut self, events: Vec<[u8; 32]>) -> &mut Self {
         self.start_tag_field('e');
         for ref id in events {
             self.add_id_element(id);
@@ -128,7 +175,7 @@ impl Filter {
         self
     }
 
-    pub fn ids(&mut self, ids: Vec<[u8; 32]>) -> &mut Filter {
+    pub fn ids(&mut self, ids: Vec<[u8; 32]>) -> &mut Self {
         self.start_ids_field();
         for ref id in ids {
             self.add_id_element(id);
@@ -137,7 +184,7 @@ impl Filter {
         self
     }
 
-    pub fn pubkeys(&mut self, pubkeys: Vec<[u8; 32]>) -> &mut Filter {
+    pub fn pubkeys(&mut self, pubkeys: Vec<[u8; 32]>) -> &mut Self {
         self.start_tag_field('p');
         for ref pk in pubkeys {
             self.add_id_element(pk);
@@ -146,7 +193,7 @@ impl Filter {
         self
     }
 
-    pub fn authors(&mut self, authors: Vec<[u8; 32]>) -> &mut Filter {
+    pub fn authors(&mut self, authors: Vec<[u8; 32]>) -> &mut Self {
         self.start_authors_field();
         for author in authors {
             self.add_id_element(&author);
@@ -155,7 +202,7 @@ impl Filter {
         self
     }
 
-    pub fn kinds(&mut self, kinds: Vec<u64>) -> &mut Filter {
+    pub fn kinds(&mut self, kinds: Vec<u64>) -> &mut Self {
         self.start_kinds_field();
         for kind in kinds {
             self.add_int_element(kind);
@@ -164,7 +211,7 @@ impl Filter {
         self
     }
 
-    pub fn pubkey(&mut self, pubkeys: Vec<[u8; 32]>) -> &mut Filter {
+    pub fn pubkey(&mut self, pubkeys: Vec<[u8; 32]>) -> &mut Self {
         self.start_pubkeys_field();
         for ref pubkey in pubkeys {
             self.add_id_element(pubkey);
@@ -173,7 +220,7 @@ impl Filter {
         self
     }
 
-    pub fn tags(&mut self, tags: Vec<String>, tag: char) -> &mut Filter {
+    pub fn tags(&mut self, tags: Vec<String>, tag: char) -> &mut Self {
         self.start_tag_field(tag);
         for tag in tags {
             self.add_str_element(&tag);
@@ -182,31 +229,31 @@ impl Filter {
         self
     }
 
-    pub fn since(&mut self, since: u64) -> &mut Filter {
+    pub fn since(&mut self, since: u64) -> &mut Self {
         self.start_since_field();
         self.add_int_element(since);
         self.end_field();
         self
     }
 
-    pub fn limit(&mut self, limit: u64) -> &mut Filter {
+    pub fn limit(&mut self, limit: u64) -> &mut Self {
         self.start_since_field();
         self.add_int_element(limit);
         self.end_field();
         self
     }
 
-    pub fn matches(&self, note: &Note) -> bool {
-        unsafe { bindings::ndb_filter_matches(self.as_mut_ptr(), note.as_ptr()) != 0 }
+    pub fn build(&mut self) -> Filter {
+        unsafe {
+            bindings::ndb_filter_end(self.as_mut_ptr());
+        };
+        Filter { data: self.data }
     }
 }
 
-/*
-// This is unsafe.. but we still need a way to free the memory on these
 impl Drop for Filter {
     fn drop(&mut self) {
         debug!("dropping filter {:?}", self);
         unsafe { bindings::ndb_filter_destroy(self.as_mut_ptr()) };
     }
 }
-*/
