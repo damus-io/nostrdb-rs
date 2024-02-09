@@ -1,7 +1,7 @@
 use crate::bindings;
 use crate::transaction::Transaction;
 
-#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub struct NoteKey(u64);
 
 impl NoteKey {
