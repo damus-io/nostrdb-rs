@@ -3394,10 +3394,11 @@ fn bindgen_test_layout_ndb_filter_field() {
     );
 }
 #[repr(C)]
+#[derive(Debug)]
 pub struct ndb_filter_elements {
     pub field: ndb_filter_field,
     pub count: ::std::os::raw::c_int,
-    pub elements: __IncompleteArrayField<ndb_filter_element>,
+    pub elements: __IncompleteArrayField<u64>,
 }
 #[test]
 fn bindgen_test_layout_ndb_filter_elements() {
@@ -3450,8 +3451,9 @@ pub struct ndb_filter {
     pub elem_buf: cursor,
     pub data_buf: cursor,
     pub num_elements: ::std::os::raw::c_int,
-    pub current: *mut ndb_filter_elements,
-    pub elements: [*mut ndb_filter_elements; 7usize],
+    pub finalized: ::std::os::raw::c_int,
+    pub current: ::std::os::raw::c_int,
+    pub elements: [::std::os::raw::c_int; 7usize],
 }
 #[test]
 fn bindgen_test_layout_ndb_filter() {
@@ -3459,7 +3461,7 @@ fn bindgen_test_layout_ndb_filter() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<ndb_filter>(),
-        120usize,
+        88usize,
         concat!("Size of: ", stringify!(ndb_filter))
     );
     assert_eq!(
@@ -3498,6 +3500,16 @@ fn bindgen_test_layout_ndb_filter() {
         )
     );
     assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).finalized) as usize - ptr as usize },
+        52usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_filter),
+            "::",
+            stringify!(finalized)
+        )
+    );
+    assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).current) as usize - ptr as usize },
         56usize,
         concat!(
@@ -3509,7 +3521,7 @@ fn bindgen_test_layout_ndb_filter() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).elements) as usize - ptr as usize },
-        64usize,
+        60usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_filter),
@@ -5032,6 +5044,9 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
+    pub fn ndb_filter_current_element(arg1: *mut ndb_filter) -> *mut ndb_filter_elements;
+}
+extern "C" {
     pub fn ndb_filter_start_field(
         arg1: *mut ndb_filter,
         arg2: ndb_filter_fieldtype,
@@ -5047,7 +5062,10 @@ extern "C" {
     pub fn ndb_filter_matches(arg1: *mut ndb_filter, arg2: *mut ndb_note) -> ::std::os::raw::c_int;
 }
 extern "C" {
-    pub fn ndb_filter_reset(arg1: *mut ndb_filter);
+    pub fn ndb_filter_clone(dst: *mut ndb_filter, src: *mut ndb_filter) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_filter_end(arg1: *mut ndb_filter) -> ::std::os::raw::c_int;
 }
 extern "C" {
     pub fn ndb_filter_end_field(arg1: *mut ndb_filter);
