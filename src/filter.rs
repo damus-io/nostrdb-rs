@@ -127,7 +127,7 @@ impl FilterBuilder {
     }
 
     fn start_tags_field(&mut self, tag: char) {
-        unsafe { bindings::ndb_filter_start_tag_field(self.as_mut_ptr(), tag as i8) };
+        unsafe { bindings::ndb_filter_start_tag_field(self.as_mut_ptr(), tag as u8 as c_char) };
     }
 
     fn start_kinds_field(&mut self) {
