@@ -284,7 +284,7 @@ impl<'a> Iterator for BlockIter<'a> {
             return None;
         }
 
-        Some(Block::new(block, self.txn))
+        Some(Block::new_transactional(block, self.txn.unwrap()))
     }
 }
 
