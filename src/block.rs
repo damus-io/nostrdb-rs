@@ -152,7 +152,7 @@ impl<'a> Block<'a> {
         self.ptr
     }
 
-    pub fn as_mention(&'a self) -> Option<Mention<'a>> {
+    pub fn as_mention(&self) -> Option<Mention<'a>> {
         if self.blocktype() != BlockType::MentionBech32 {
             return None;
         }
@@ -170,7 +170,7 @@ impl<'a> Block<'a> {
         }
     }
 
-    fn c_bech32(&'a self) -> &'a bindings::nostr_bech32 {
+    fn c_bech32(&self) -> &'a bindings::nostr_bech32 {
         unsafe { &(*self.as_ptr()).block.mention_bech32.bech32 }
     }
 
