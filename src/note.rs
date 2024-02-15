@@ -1,7 +1,8 @@
 use crate::bindings;
 use crate::transaction::Transaction;
+use std::hash::Hash;
 
-#[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub struct NoteKey(u64);
 
 impl NoteKey {
