@@ -1,4 +1,5 @@
 use crate::bindings;
+use crate::tags::Tags;
 use crate::transaction::Transaction;
 use std::hash::Hash;
 
@@ -15,7 +16,7 @@ impl NoteKey {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Note<'a> {
     /// A note in-memory outside of nostrdb. This note is a pointer to a note in
     /// memory and will be free'd when [Drop]ped. Method such as [Note::from_json]
@@ -134,6 +135,11 @@ impl<'a> Note<'a> {
 
     pub fn kind(&self) -> u32 {
         unsafe { bindings::ndb_note_kind(self.as_ptr()) }
+    }
+
+    pub fn tags(&'a self) -> Tags<'a> {
+        let tags = unsafe { bindings::ndb_note_tags(self.as_ptr()) };
+        Tags::new(tags, self)
     }
 }
 
