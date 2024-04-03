@@ -77,8 +77,10 @@ fn main() {
         .include("nostrdb/deps/secp256k1/include")
         // Add other include paths
         //.flag("-Wall")
+        .flag("-Wno-sign-compare")
         .flag("-Wno-misleading-indentation")
-        .flag("-Wno-unused-function");
+        .flag("-Wno-unused-function")
+        .flag("-Wno-unused-parameter");
     //.flag("-Werror")
     //.flag("-g")
 

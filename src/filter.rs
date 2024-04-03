@@ -142,6 +142,7 @@ impl FilterBuilder {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_SINCE);
     }
 
+    #[allow(dead_code)]
     fn start_limit_field(&mut self) {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_LIMIT);
     }
@@ -150,6 +151,7 @@ impl FilterBuilder {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_IDS);
     }
 
+    #[allow(dead_code)]
     fn start_events_field(&mut self) {
         self.start_tags_field('e');
     }

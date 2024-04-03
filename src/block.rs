@@ -9,6 +9,8 @@ pub struct Blocks<'a> {
 #[derive(Debug)]
 pub struct Block<'a> {
     ptr: *mut bindings::ndb_block,
+
+    #[allow(dead_code)]
     txn: Option<&'a Transaction>,
 }
 
@@ -130,6 +132,7 @@ impl Bech32Type {
 }
 
 impl<'a> Block<'a> {
+    #[allow(dead_code)]
     pub(crate) fn new_transactional(
         ptr: *mut bindings::ndb_block,
         txn: &'a Transaction,
@@ -140,6 +143,7 @@ impl<'a> Block<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn new_owned(ptr: *mut bindings::ndb_block) -> Block<'static> {
         Block { ptr, txn: None }
     }
@@ -199,6 +203,7 @@ impl<'a> Blocks<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn new_owned(ptr: *mut bindings::ndb_blocks) -> Blocks<'static> {
         Blocks { ptr, txn: None }
     }

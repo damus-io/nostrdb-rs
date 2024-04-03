@@ -44,6 +44,7 @@ impl<'a> Note<'a> {
     /// use this method directly, public consumer would use from_json instead.
     ///
     /// [Drop]: std::ops::Drop
+    #[allow(dead_code)]
     pub(crate) fn new_owned(ptr: *mut bindings::ndb_note, size: usize) -> Note<'static> {
         Note::Owned { ptr, size }
     }
