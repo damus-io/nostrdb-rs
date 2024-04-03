@@ -30,6 +30,10 @@ fn secp256k1_build() {
         .file("nostrdb/deps/secp256k1/src/precomputed_ecmult.c")
         .file("nostrdb/deps/secp256k1/src/secp256k1.c");
 
+    if env::var("PROFILE").unwrap() == "debug" {
+        base_config.flag("-O1");
+    }
+
     if base_config.try_compile("libsecp256k1.a").is_err() {
         // Some embedded platforms may not have, eg, string.h available, so if the build fails
         // simply try again with the wasm sysroot (but without the wasm type sizes) in the hopes
@@ -80,6 +84,7 @@ fn main() {
 
     if env::var("PROFILE").unwrap() == "debug" {
         build.flag("-DDEBUG");
+        build.flag("-O1");
     }
 
     build.compile("libnostrdb.a");
