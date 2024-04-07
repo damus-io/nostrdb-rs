@@ -188,6 +188,7 @@ mod tests {
             let t0 = tags_iter.next().expect("t0");
             let t0_e0 = t0.get(0).expect("e tag ok");
             let t0_e1 = t0.get(1).expect("e id ok");
+            assert_eq!(t0.get(2).is_none(), true);
             assert_eq!(t0_e0.variant(), NdbStrVariant::Str("e"));
             assert_eq!(
                 t0_e1.variant(),
@@ -201,6 +202,7 @@ mod tests {
             let t1 = tags_iter.next().expect("t1");
             let t1_e0 = t1.get(0).expect("p tag ok");
             let t1_e1 = t1.get(1).expect("p id ok");
+            assert_eq!(t1.get(2).is_none(), true);
             assert_eq!(t1_e0.variant(), NdbStrVariant::Str("p"));
             assert_eq!(
                 t1_e1.variant(),
@@ -214,6 +216,7 @@ mod tests {
             let t2 = tags_iter.next().expect("t2");
             let t2_e0 = t2.get(0).expect("hi tag ok");
             let t2_e1 = t2.get(1).expect("hi value ok");
+            assert_eq!(t2.get(2).is_none(), true);
             assert_eq!(t2_e0.variant(), NdbStrVariant::Str("hi"));
             assert_eq!(t2_e1.variant(), NdbStrVariant::Str("3"));
         }
