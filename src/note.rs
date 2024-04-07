@@ -141,6 +141,13 @@ impl<'a> Note<'a> {
         let tags = unsafe { bindings::ndb_note_tags(self.as_ptr()) };
         Tags::new(tags, self)
     }
+
+    pub fn sig(&self) -> &'a [u8; 32] {
+        unsafe {
+            let ptr = bindings::ndb_note_sig(self.as_ptr());
+            &*(ptr as *const [u8; 32])
+        }
+    }
 }
 
 impl<'a> Drop for Note<'a> {
