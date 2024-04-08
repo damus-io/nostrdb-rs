@@ -15,6 +15,11 @@ impl<'a> Tag<'a> {
         unsafe { bindings::ndb_tag_count(self.as_ptr()) }
     }
 
+    #[inline]
+    pub fn into_iter(self) -> TagIter<'a> {
+        TagIter::new(self)
+    }
+
     pub fn get(&self, ind: u16) -> Option<NdbStr<'a>> {
         if ind >= self.count() {
             return None;
