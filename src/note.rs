@@ -142,10 +142,10 @@ impl<'a> Note<'a> {
         Tags::new(tags, self)
     }
 
-    pub fn sig(&self) -> &'a [u8; 32] {
+    pub fn sig(&self) -> &'a [u8; 64] {
         unsafe {
             let ptr = bindings::ndb_note_sig(self.as_ptr());
-            &*(ptr as *const [u8; 32])
+            &*(ptr as *const [u8; 64])
         }
     }
 }
