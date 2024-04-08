@@ -142,7 +142,6 @@ impl FilterBuilder {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_SINCE);
     }
 
-    #[allow(dead_code)]
     fn start_limit_field(&mut self) {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_LIMIT);
     }
@@ -239,7 +238,7 @@ impl FilterBuilder {
     }
 
     pub fn limit(&mut self, limit: u64) -> &mut Self {
-        self.start_since_field();
+        self.start_limit_field();
         self.add_int_element(limit);
         self.end_field();
         self
