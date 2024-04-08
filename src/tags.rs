@@ -143,10 +143,12 @@ impl<'a> Iterator for TagsIter<'a> {
     type Item = Tag<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        unsafe {
-            bindings::ndb_tags_iterate_next(self.as_mut_ptr());
-        };
-        self.tag()
+        let res = unsafe { bindings::ndb_tags_iterate_next(self.as_mut_ptr()) };
+        if res == 0 {
+            None
+        } else {
+            self.tag()
+        }
     }
 }
 
@@ -219,6 +221,8 @@ mod tests {
             assert_eq!(t2.get(2).is_none(), true);
             assert_eq!(t2_e0.variant(), NdbStrVariant::Str("hi"));
             assert_eq!(t2_e1.variant(), NdbStrVariant::Str("3"));
+
+            assert_eq!(tags_iter.next().is_none(), true);
         }
     }
 }
