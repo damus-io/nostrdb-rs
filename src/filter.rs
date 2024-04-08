@@ -142,6 +142,10 @@ impl FilterBuilder {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_SINCE);
     }
 
+    fn start_until_field(&mut self) {
+        self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_UNTIL);
+    }
+
     fn start_limit_field(&mut self) {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_LIMIT);
     }
@@ -233,6 +237,13 @@ impl FilterBuilder {
     pub fn since(&mut self, since: u64) -> &mut Self {
         self.start_since_field();
         self.add_int_element(since);
+        self.end_field();
+        self
+    }
+
+    pub fn until(&mut self, until: u64) -> &mut Self {
+        self.start_until_field();
+        self.add_int_element(until);
         self.end_field();
         self
     }
