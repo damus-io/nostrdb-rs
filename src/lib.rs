@@ -34,6 +34,7 @@ pub use profile::ProfileRecord;
 pub use query::QueryResult;
 pub use result::Result;
 pub use subscription::Subscription;
+pub use tags::{Tag, TagIter, Tags, TagsIter};
 pub use transaction::Transaction;
 
 mod test_util;
