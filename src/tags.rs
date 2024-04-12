@@ -15,11 +15,6 @@ impl<'a> Tag<'a> {
         unsafe { bindings::ndb_tag_count(self.as_ptr()) }
     }
 
-    #[inline]
-    pub fn into_iter(self) -> TagIter<'a> {
-        TagIter::new(self)
-    }
-
     pub fn get(&self, ind: u16) -> Option<NdbStr<'a>> {
         if ind >= self.count() {
             return None;
@@ -43,10 +38,28 @@ impl<'a> Tag<'a> {
     }
 }
 
+impl<'a> IntoIterator for Tag<'a> {
+    type Item = NdbStr<'a>;
+    type IntoIter = TagIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        TagIter::new(self)
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub struct Tags<'a> {
     ptr: *mut bindings::ndb_tags,
     note: &'a Note<'a>,
+}
+
+impl<'a> IntoIterator for Tags<'a> {
+    type Item = Tag<'a>;
+    type IntoIter = TagsIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        TagsIter::new(self.note())
+    }
 }
 
 impl<'a> Tags<'a> {
