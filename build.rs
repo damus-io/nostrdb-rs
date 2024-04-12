@@ -74,15 +74,24 @@ fn main() {
         ])
         .include("nostrdb/deps/lmdb")
         .include("nostrdb/deps/flatcc/include")
-        .include("nostrdb/deps/secp256k1/include")
-        // Add other include paths
-        //.flag("-Wall")
-        .flag("-Wno-sign-compare")
-        .flag("-Wno-misleading-indentation")
-        .flag("-Wno-unused-function")
-        .flag("-Wno-unused-parameter");
-    //.flag("-Werror")
-    //.flag("-g")
+        .include("nostrdb/deps/secp256k1/include");
+
+    // Detect the compiler being used: MSVC or GCC (like MinGW on Windows)
+    if env::var("TARGET").unwrap().contains("msvc") {
+        // MSVC-specific flags
+        // Example: build.flag("/W4"); // Set warning level to 4 for MSVC
+        // Suppress specific warnings in MSVC:
+        build.flag("/wd4100"); // unreferenced formal parameter
+                               // Add more MSVC-specific flags as needed
+    } else {
+        // GCC-specific flags
+        build
+            .flag("-Wno-sign-compare")
+            .flag("-Wno-misleading-indentation")
+            .flag("-Wno-unused-function")
+            .flag("-Wno-unused-parameter");
+        // Add more GCC-specific flags as needed
+    }
 
     if env::var("PROFILE").unwrap() == "debug" {
         build.flag("-DDEBUG");
