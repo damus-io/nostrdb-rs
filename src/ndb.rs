@@ -201,7 +201,7 @@ impl Ndb {
         }
 
         // Convert the raw pointer to a Note instance
-        Ok(ProfileRecord::new(
+        Ok(ProfileRecord::new_transactional(
             profile_record_ptr,
             len,
             primkey,

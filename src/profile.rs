@@ -1,14 +1,34 @@
-use crate::ndb_profile::{root_as_ndb_profile_record_unchecked, NdbProfileRecord};
-use crate::Transaction;
+use crate::ndb_profile::{
+    root_as_ndb_profile_record, root_as_ndb_profile_record_unchecked, NdbProfileRecord,
+};
+use crate::{Error, Result, Transaction};
 
-pub struct ProfileRecord<'a> {
-    pub record: NdbProfileRecord<'a>,
-    pub primary_key: u64,
-    pub transaction: &'a Transaction,
+pub enum ProfileRecord<'a> {
+    Transactional {
+        record: NdbProfileRecord<'a>,
+        primary_key: u64,
+        transaction: &'a Transaction,
+    },
+
+    Owned {
+        record: NdbProfileRecord<'a>,
+    },
 }
 
 impl<'a> ProfileRecord<'a> {
-    pub(crate) fn new(
+    pub fn record(&self) -> NdbProfileRecord<'a> {
+        match self {
+            ProfileRecord::Transactional { record, .. } => *record,
+            ProfileRecord::Owned { record } => *record,
+        }
+    }
+
+    pub fn new_owned(root: &'a [u8]) -> Result<ProfileRecord<'a>> {
+        let record = root_as_ndb_profile_record(root).map_err(|_| Error::DecodeError)?;
+        Ok(ProfileRecord::Owned { record })
+    }
+
+    pub(crate) fn new_transactional(
         ptr: *mut ::std::os::raw::c_void,
         len: usize,
         primary_key: u64,
@@ -18,7 +38,7 @@ impl<'a> ProfileRecord<'a> {
             let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
             root_as_ndb_profile_record_unchecked(bytes)
         };
-        ProfileRecord {
+        ProfileRecord::Transactional {
             record,
             transaction,
             primary_key,
@@ -57,7 +77,7 @@ mod tests {
                 .get_profile_by_pubkey(&mut txn, &pk.try_into().expect("bytes"))
                 .expect("profile record");
 
-            let profile = pr.record.profile().unwrap();
+            let profile = pr.record().profile().unwrap();
             assert_eq!(Some("jb55"), profile.name());
         }
 
