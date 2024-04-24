@@ -3,29 +3,28 @@ use crate::ndb_profile::{
 };
 use crate::{Error, Result, Transaction};
 
-pub enum ProfileRecord<'a> {
-    Transactional {
-        record: NdbProfileRecord<'a>,
-        primary_key: u64,
-        transaction: &'a Transaction,
-    },
+pub struct TransactionalProfileRecord<'a> {
+    pub record: NdbProfileRecord<'a>,
+    pub primary_key: u64,
+    pub transaction: &'a Transaction,
+}
 
-    Owned {
-        record: NdbProfileRecord<'a>,
-    },
+pub enum ProfileRecord<'a> {
+    Transactional(TransactionalProfileRecord<'a>),
+    Owned(NdbProfileRecord<'a>),
 }
 
 impl<'a> ProfileRecord<'a> {
     pub fn record(&self) -> NdbProfileRecord<'a> {
         match self {
-            ProfileRecord::Transactional { record, .. } => *record,
-            ProfileRecord::Owned { record } => *record,
+            ProfileRecord::Transactional(tr) => tr.record,
+            ProfileRecord::Owned(r) => *r,
         }
     }
 
     pub fn new_owned(root: &'a [u8]) -> Result<ProfileRecord<'a>> {
         let record = root_as_ndb_profile_record(root).map_err(|_| Error::DecodeError)?;
-        Ok(ProfileRecord::Owned { record })
+        Ok(ProfileRecord::Owned(record))
     }
 
     pub(crate) fn new_transactional(
@@ -38,11 +37,11 @@ impl<'a> ProfileRecord<'a> {
             let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
             root_as_ndb_profile_record_unchecked(bytes)
         };
-        ProfileRecord::Transactional {
+        ProfileRecord::Transactional(TransactionalProfileRecord {
             record,
             transaction,
             primary_key,
-        }
+        })
     }
 }
 
