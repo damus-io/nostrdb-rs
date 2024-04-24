@@ -30,7 +30,7 @@ pub use ndb::Ndb;
 pub use ndb_profile::{NdbProfile, NdbProfileRecord};
 pub use ndb_str::{NdbStr, NdbStrVariant};
 pub use note::{Note, NoteKey};
-pub use profile::ProfileRecord;
+pub use profile::{ProfileKey, ProfileRecord};
 pub use query::QueryResult;
 pub use result::Result;
 pub use subscription::Subscription;

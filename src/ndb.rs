@@ -3,8 +3,8 @@ use std::ffi::CString;
 use std::ptr;
 
 use crate::{
-    bindings, Blocks, Config, Error, Filter, Note, NoteKey, ProfileRecord, QueryResult, Result,
-    Subscription, Transaction,
+    bindings, Blocks, Config, Error, Filter, Note, NoteKey, ProfileKey, ProfileRecord, QueryResult,
+    Result, Subscription, Transaction,
 };
 use std::fs;
 use std::os::raw::c_int;
@@ -204,7 +204,7 @@ impl Ndb {
         Ok(ProfileRecord::new_transactional(
             profile_record_ptr,
             len,
-            primkey,
+            ProfileKey::new(primkey),
             transaction,
         ))
     }

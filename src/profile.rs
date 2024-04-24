@@ -5,7 +5,7 @@ use crate::{Error, Result, Transaction};
 
 pub struct TransactionalProfileRecord<'a> {
     pub record: NdbProfileRecord<'a>,
-    pub primary_key: u64,
+    pub primary_key: ProfileKey,
     pub transaction: &'a Transaction,
 }
 
@@ -14,11 +14,31 @@ pub enum ProfileRecord<'a> {
     Owned(NdbProfileRecord<'a>),
 }
 
+#[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash)]
+pub struct ProfileKey(u64);
+
+impl ProfileKey {
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+
+    pub fn new(key: u64) -> Self {
+        ProfileKey(key)
+    }
+}
+
 impl<'a> ProfileRecord<'a> {
     pub fn record(&self) -> NdbProfileRecord<'a> {
         match self {
             ProfileRecord::Transactional(tr) => tr.record,
             ProfileRecord::Owned(r) => *r,
+        }
+    }
+
+    pub fn key(&self) -> Option<ProfileKey> {
+        match self {
+            ProfileRecord::Transactional(tr) => Some(tr.primary_key),
+            ProfileRecord::Owned(_) => None,
         }
     }
 
@@ -30,7 +50,7 @@ impl<'a> ProfileRecord<'a> {
     pub(crate) fn new_transactional(
         ptr: *mut ::std::os::raw::c_void,
         len: usize,
-        primary_key: u64,
+        primary_key: ProfileKey,
         transaction: &'a Transaction,
     ) -> ProfileRecord<'a> {
         let record = unsafe {
