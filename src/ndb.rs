@@ -178,6 +178,31 @@ impl Ndb {
         }
     }
 
+    pub fn get_profile_by_key<'a>(
+        &self,
+        transaction: &'a Transaction,
+        key: ProfileKey,
+    ) -> Result<ProfileRecord<'a>> {
+        let mut len: usize = 0;
+
+        let profile_record_ptr = unsafe {
+            bindings::ndb_get_profile_by_key(transaction.as_mut_ptr(), key.as_u64(), &mut len)
+        };
+
+        if profile_record_ptr.is_null() {
+            // Handle null pointer (e.g., note not found or error occurred)
+            return Err(Error::NotFound);
+        }
+
+        // Convert the raw pointer to a Note instance
+        Ok(ProfileRecord::new_transactional(
+            profile_record_ptr,
+            len,
+            key,
+            transaction,
+        ))
+    }
+
     pub fn get_profile_by_pubkey<'a>(
         &self,
         transaction: &'a Transaction,
