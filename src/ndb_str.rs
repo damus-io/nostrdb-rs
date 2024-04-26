@@ -11,6 +11,22 @@ pub enum NdbStrVariant<'a> {
     Str(&'a str),
 }
 
+impl<'a> NdbStrVariant<'a> {
+    pub fn id(&self) -> Option<&'a [u8; 32]> {
+        match self {
+            Self::Id(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn str(&self) -> Option<&'a str> {
+        match self {
+            Self::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
 impl bindings::ndb_str {
     pub fn str(&self) -> *const ::std::os::raw::c_char {
         unsafe { self.__bindgen_anon_1.str_ }

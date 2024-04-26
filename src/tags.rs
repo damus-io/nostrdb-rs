@@ -15,10 +15,7 @@ impl<'a> Tag<'a> {
         unsafe { bindings::ndb_tag_count(self.as_ptr()) }
     }
 
-    pub fn get(&self, ind: u16) -> Option<NdbStr<'a>> {
-        if ind >= self.count() {
-            return None;
-        }
+    pub fn get_unchecked(&self, ind: u16) -> NdbStr<'a> {
         let nstr = unsafe {
             bindings::ndb_tag_str(
                 self.note().as_ptr(),
@@ -26,7 +23,14 @@ impl<'a> Tag<'a> {
                 ind as ::std::os::raw::c_int,
             )
         };
-        Some(NdbStr::new(nstr, self.note))
+        NdbStr::new(nstr, self.note)
+    }
+
+    pub fn get(&self, ind: u16) -> Option<NdbStr<'a>> {
+        if ind >= self.count() {
+            return None;
+        }
+        Some(self.get_unchecked(ind))
     }
 
     pub fn note(&self) -> &'a Note<'a> {
@@ -172,7 +176,6 @@ impl<'a> Iterator for TagsIter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::config::Config;
     use crate::test_util;
     use crate::{Filter, Ndb, NdbStrVariant, Transaction};

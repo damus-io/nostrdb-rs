@@ -21,6 +21,7 @@ mod result;
 mod subscription;
 mod tags;
 mod transaction;
+mod util;
 
 pub use block::{Block, BlockType, Blocks, Mention};
 pub use config::Config;
@@ -36,5 +37,6 @@ pub use result::Result;
 pub use subscription::Subscription;
 pub use tags::{Tag, TagIter, Tags, TagsIter};
 pub use transaction::Transaction;
+pub use util::nip10::{Marker, NoteIdRef, NoteReply};
 
 mod test_util;
