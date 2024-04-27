@@ -67,6 +67,7 @@ impl Default for bindings::ndb_filter {
 }
 
 impl Filter {
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> FilterBuilder {
         FilterBuilder {
             data: Default::default(),
@@ -81,11 +82,17 @@ impl Filter {
     }
 
     pub fn as_ptr(&self) -> *const bindings::ndb_filter {
-        return self.data.as_ptr();
+        self.data.as_ptr()
     }
 
     pub fn as_mut_ptr(&mut self) -> *mut bindings::ndb_filter {
-        return self.data.as_mut_ptr() as *mut bindings::ndb_filter;
+        self.data.as_mut_ptr()
+    }
+}
+
+impl Default for FilterBuilder {
+    fn default() -> Self {
+        FilterBuilder::new()
     }
 }
 
@@ -97,11 +104,11 @@ impl FilterBuilder {
     }
 
     pub fn as_ptr(&self) -> *const bindings::ndb_filter {
-        return self.data.as_ptr();
+        self.data.as_ptr()
     }
 
     pub fn as_mut_ptr(&mut self) -> *mut bindings::ndb_filter {
-        return self.data.as_mut_ptr();
+        self.data.as_mut_ptr()
     }
 
     fn add_int_element(&mut self, i: u64) {

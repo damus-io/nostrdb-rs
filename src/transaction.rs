@@ -47,10 +47,7 @@ impl bindings::ndb_txn {
         // just create something uninitialized. ndb_begin_query will initialize it for us
         let lmdb: *mut bindings::ndb_lmdb = std::ptr::null_mut();
         let mdb_txn: *mut ::std::os::raw::c_void = std::ptr::null_mut();
-        bindings::ndb_txn {
-            lmdb: lmdb,
-            mdb_txn: mdb_txn,
-        }
+        bindings::ndb_txn { lmdb, mdb_txn }
     }
 }
 

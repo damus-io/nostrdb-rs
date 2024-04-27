@@ -152,9 +152,8 @@ impl<'a> Note<'a> {
 
 impl<'a> Drop for Note<'a> {
     fn drop(&mut self) {
-        match self {
-            Note::Owned { ptr, .. } => unsafe { libc::free((*ptr) as *mut libc::c_void) },
-            _ => (),
+        if let Note::Owned { ptr, .. } = self {
+            unsafe { libc::free((*ptr) as *mut libc::c_void) }
         }
     }
 }

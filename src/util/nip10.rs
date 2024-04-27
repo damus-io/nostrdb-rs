@@ -102,15 +102,11 @@ fn tags_to_note_reply<'a>(tags: Tags<'a>) -> NoteReply<'a> {
                     }
                 }
             }
-        } else {
-            if first {
-                root = Some(note_ref);
-                first = false;
-            } else {
-                if reply.is_none() {
-                    reply = Some(note_ref)
-                }
-            }
+        } else if first {
+            root = Some(note_ref);
+            first = false;
+        } else if reply.is_none() {
+            reply = Some(note_ref)
         }
     }
 

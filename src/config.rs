@@ -4,6 +4,12 @@ pub struct Config {
     pub config: bindings::ndb_config,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Config::new()
+    }
+}
+
 impl Config {
     pub fn new() -> Self {
         let mut config = bindings::ndb_config {

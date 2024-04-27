@@ -1,4 +1,3 @@
-use libc;
 use std::ffi::CString;
 use std::ptr;
 
@@ -49,7 +48,7 @@ impl Ndb {
 
         let path = Path::new(db_dir);
         if !path.exists() {
-            let _ = fs::create_dir_all(&path);
+            let _ = fs::create_dir_all(path);
         }
 
         let result = unsafe { bindings::ndb_init(&mut ndb, db_dir_cstr.as_ptr(), config.as_ptr()) };
@@ -144,7 +143,7 @@ impl Ndb {
             vec.set_len(res as usize);
         };
 
-        vec.into_iter().map(|n| NoteKey::new(n)).collect()
+        vec.into_iter().map(NoteKey::new).collect()
     }
 
     pub async fn wait_for_notes(&self, sub: &Subscription, max_notes: u32) -> Result<Vec<NoteKey>> {
@@ -172,7 +171,7 @@ impl Ndb {
         });
 
         match handle.await {
-            Ok(Ok(res)) => Ok(res.into_iter().map(|n| NoteKey::new(n)).collect()),
+            Ok(Ok(res)) => Ok(res.into_iter().map(NoteKey::new).collect()),
             Ok(Err(err)) => Err(err),
             Err(_) => Err(Error::SubscriptionError),
         }
@@ -324,7 +323,7 @@ impl Ndb {
 
     /// Get the underlying pointer to the context in C
     pub fn as_ptr(&self) -> *mut bindings::ndb {
-        return self.refs.ndb;
+        self.refs.ndb
     }
 }
 

@@ -170,7 +170,7 @@ impl<'a> Block<'a> {
                 return "";
             }
 
-            (&*str_block).as_str()
+            (*str_block).as_str()
         }
     }
 
