@@ -30,7 +30,7 @@ pub struct NoteIdRefBuf {
     pub marker: Option<Marker>,
 }
 
-fn tag_to_note_id_ref<'a>(tag: Tag<'a>, marker: Option<Marker>, index: i32) -> NoteIdRef<'a> {
+fn tag_to_note_id_ref(tag: Tag<'_>, marker: Option<Marker>, index: i32) -> NoteIdRef<'_> {
     let id = tag
         .get_unchecked(1)
         .variant()
@@ -245,7 +245,7 @@ pub fn tag_to_noteid_ref(tag: Tag<'_>, index: u16) -> Result<NoteIdRef<'_>, Erro
     let relay = tag
         .get(2)
         .and_then(|t| t.variant().str())
-        .filter(|x| *x != "");
+        .filter(|x| !x.is_empty());
     let marker = tag
         .get(3)
         .and_then(|t| t.variant().str())
