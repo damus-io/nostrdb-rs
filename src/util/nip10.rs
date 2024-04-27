@@ -30,26 +30,26 @@ pub struct NoteIdRefBuf {
     pub marker: Option<Marker>,
 }
 
+fn tag_to_note_id_ref<'a>(tag: Tag<'a>, marker: Option<Marker>, index: i32) -> NoteIdRef<'a> {
+    let id = tag
+        .get_unchecked(1)
+        .variant()
+        .id()
+        .expect("expected id at index, do you have the correct note?");
+    let relay = tag.get(2).and_then(|t| t.variant().str());
+    NoteIdRef {
+        index: index as u16,
+        id,
+        relay,
+        marker,
+    }
+}
+
 impl NoteReplyBuf {
     // TODO(jb55): optimize this function. It is not the nicest code.
     // We could simplify the index lookup by offsets into the Note's
     // string table
     pub fn borrow<'a>(&self, tags: Tags<'a>) -> NoteReply<'a> {
-        let helper = |tag: Tag<'a>, marker: Option<Marker>, index: i32| {
-            let id = tag
-                .get_unchecked(1)
-                .variant()
-                .id()
-                .expect("expected id at index, do you have the correct note?");
-            let relay = tag.get(2).and_then(|t| t.variant().str());
-            Some(NoteIdRef {
-                index: index as u16,
-                id,
-                relay,
-                marker,
-            })
-        };
-
         let mut root: Option<NoteIdRef<'a>> = None;
         let mut reply: Option<NoteIdRef<'a>> = None;
         let mut mention: Option<NoteIdRef<'a>> = None;
@@ -66,19 +66,31 @@ impl NoteReplyBuf {
                 .as_ref()
                 .map_or(false, |x| x.index == index as u16)
             {
-                root = helper(tag, self.root.as_ref().unwrap().marker, index)
+                root = Some(tag_to_note_id_ref(
+                    tag,
+                    self.root.as_ref().unwrap().marker,
+                    index,
+                ))
             } else if self
                 .reply
                 .as_ref()
                 .map_or(false, |x| x.index == index as u16)
             {
-                reply = helper(tag, self.reply.as_ref().unwrap().marker, index)
+                reply = Some(tag_to_note_id_ref(
+                    tag,
+                    self.reply.as_ref().unwrap().marker,
+                    index,
+                ))
             } else if self
                 .mention
                 .as_ref()
                 .map_or(false, |x| x.index == index as u16)
             {
-                mention = helper(tag, self.mention.as_ref().unwrap().marker, index)
+                mention = Some(tag_to_note_id_ref(
+                    tag,
+                    self.mention.as_ref().unwrap().marker,
+                    index,
+                ))
             }
         }
 
