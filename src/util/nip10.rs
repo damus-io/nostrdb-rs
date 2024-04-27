@@ -141,6 +141,10 @@ impl<'a> NoteReply<'a> {
         self.root.is_some() && self.reply.is_none()
     }
 
+    pub fn root(self) -> Option<NoteIdRef<'a>> {
+        self.root
+    }
+
     pub fn is_reply(&self) -> bool {
         self.reply().is_some()
     }
