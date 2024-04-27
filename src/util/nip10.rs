@@ -184,6 +184,7 @@ fn tags_to_note_reply<'a>(tags: Tags<'a>) -> NoteReply<'a> {
     let mut mention: Option<NoteIdRef<'a>> = None;
     let mut first: bool = true;
     let mut index: i32 = -1;
+    let mut any_marker: bool = false;
 
     for tag in tags {
         index += 1;
@@ -199,23 +200,16 @@ fn tags_to_note_reply<'a>(tags: Tags<'a>) -> NoteReply<'a> {
         };
 
         if let Some(marker) = note_ref.marker {
+            any_marker = true;
             match marker {
                 Marker::Root => root = Some(note_ref),
-                Marker::Reply => {
-                    if reply.is_none() {
-                        reply = Some(note_ref)
-                    }
-                }
-                Marker::Mention => {
-                    if mention.is_none() {
-                        mention = Some(note_ref)
-                    }
-                }
+                Marker::Reply => reply = Some(note_ref),
+                Marker::Mention => mention = Some(note_ref),
             }
-        } else if first {
+        } else if !any_marker && first {
             root = Some(note_ref);
             first = false;
-        } else if reply.is_none() {
+        } else if !any_marker && reply.is_none() {
             reply = Some(note_ref)
         }
     }
@@ -435,6 +429,93 @@ mod test {
             assert_eq!(*note_reply.mention().unwrap().id, mention_id);
             assert_eq!(note_reply.is_reply_to_root(), true);
             assert_eq!(note_reply.is_reply(), true);
+        }
+    }
+
+    #[tokio::test]
+    async fn nip10_marker_mixed() {
+        let db = "target/testdbs/nip10_marker_mixed";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            let filter = Filter::new().kinds(vec![1]).build();
+            let root_id: [u8; 32] =
+                hex::decode("27e71cf53299dafb5dc7bcc0a078357418a4375cb1097bf5184662493f79a627")
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
+            let reply_id: [u8; 32] =
+                hex::decode("1a616998552cf76e9786f76ac68f6104cdae46377330735c68bfe0b9426d2fa8")
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
+            let sub = ndb.subscribe(vec![filter.clone()]).expect("sub_id");
+            let waiter = ndb.wait_for_notes(&sub, 1);
+
+            ndb.process_event(r#"
+            [
+              "EVENT",
+              "nostril-query",
+              {
+                "content": "Go to pleblab plz",
+                "created_at": 1714157088,
+                "id": "19ae8cd276185f6f48fd7e25736c260ea0ac25d9b591ec3194631e3196e19622",
+                "kind": 1,
+                "pubkey": "ae1008d23930b776c18092f6eab41e4b09fcf3f03f3641b1b4e6ee3aa166d760",
+                "sig": "fdafc7192a0f3b5fef5ae794ef61eb2b3c7cc70bace53f3aa6d4263347581d36add7e9468a4e329d9c986e3a5c46e4689a6b79f60c5cf7778a403316ac5b2629",
+                "tags": [
+                  [
+                    "e",
+                    "27e71cf53299dafb5dc7bcc0a078357418a4375cb1097bf5184662493f79a627",
+                    "",
+                    "root"
+                  ],
+                  [
+                    "e",
+                    "f99046bd87be7508d55e139de48517c06ef90830d77a5d3213df858d77bb2f8f"
+                  ],
+                  [
+                    "e",
+                    "1a616998552cf76e9786f76ac68f6104cdae46377330735c68bfe0b9426d2fa8",
+                    "",
+                    "reply"
+                  ],
+                  [
+                    "p",
+                    "3efdaebb1d8923ebd99c9e7ace3b4194ab45512e2be79c1b7d68d9243e0d2681"
+                  ],
+                  [
+                    "p",
+                    "8ea485266b2285463b13bf835907161c22bb3da1e652b443db14f9cee6720a43"
+                  ],
+                  [
+                    "p",
+                    "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+                  ]
+                ]
+              }
+            ]
+            "#).expect("process ok");
+
+            let res = waiter.await.expect("await ok");
+            assert_eq!(res, vec![NoteKey::new(1)]);
+            let txn = Transaction::new(&ndb).unwrap();
+            let res = ndb.query(&txn, vec![filter], 1).expect("note");
+            let note = &res[0].note;
+            let note_reply = NoteReply::new(note.tags());
+
+            assert_eq!(note_reply.reply_to_root().is_none(), true);
+            assert_eq!(*note_reply.reply().unwrap().id, reply_id);
+            assert_eq!(*note_reply.root().unwrap().id, root_id);
+            assert_eq!(note_reply.mention().is_none(), true);
+
+            // test the to_owned version
+            let back_again = note_reply.to_owned().borrow(note.tags());
+            assert_eq!(back_again.reply_to_root().is_none(), true);
+            assert_eq!(*back_again.reply().unwrap().id, reply_id);
+            assert_eq!(*back_again.root().unwrap().id, root_id);
+            assert_eq!(back_again.mention().is_none(), true);
         }
     }
 
