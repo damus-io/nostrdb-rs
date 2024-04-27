@@ -7,11 +7,87 @@ pub enum Marker {
     Mention,
 }
 
+/// Parsed `e` tags
 #[derive(Clone, Copy, Debug)]
 pub struct NoteIdRef<'a> {
+    pub index: u16,
     pub id: &'a [u8; 32],
     pub relay: Option<&'a str>,
     pub marker: Option<Marker>,
+}
+
+impl<'a> NoteIdRef<'a> {
+    pub fn to_owned(&self) -> NoteIdRefBuf {
+        NoteIdRefBuf {
+            index: self.index,
+            marker: self.marker,
+        }
+    }
+}
+
+pub struct NoteIdRefBuf {
+    pub index: u16,
+    pub marker: Option<Marker>,
+}
+
+impl NoteReplyBuf {
+    // TODO(jb55): optimize this function. It is not the nicest code.
+    // We could simplify the index lookup by offsets into the Note's
+    // string table
+    pub fn borrow<'a>(&self, tags: Tags<'a>) -> NoteReply<'a> {
+        let helper = |tag: Tag<'a>, marker: Option<Marker>, index: i32| {
+            let id = tag
+                .get_unchecked(1)
+                .variant()
+                .id()
+                .expect("expected id at index, do you have the correct note?");
+            let relay = tag.get(2).and_then(|t| t.variant().str());
+            Some(NoteIdRef {
+                index: index as u16,
+                id,
+                relay,
+                marker,
+            })
+        };
+
+        let mut root: Option<NoteIdRef<'a>> = None;
+        let mut reply: Option<NoteIdRef<'a>> = None;
+        let mut mention: Option<NoteIdRef<'a>> = None;
+
+        let mut index: i32 = -1;
+        for tag in tags {
+            index += 1;
+            if tag.count() < 2 && tag.get_unchecked(0).variant().str() != Some("e") {
+                continue;
+            }
+
+            if self
+                .root
+                .as_ref()
+                .map_or(false, |x| x.index == index as u16)
+            {
+                root = helper(tag, self.root.as_ref().unwrap().marker, index)
+            } else if self
+                .reply
+                .as_ref()
+                .map_or(false, |x| x.index == index as u16)
+            {
+                reply = helper(tag, self.reply.as_ref().unwrap().marker, index)
+            } else if self
+                .mention
+                .as_ref()
+                .map_or(false, |x| x.index == index as u16)
+            {
+                mention = helper(tag, self.mention.as_ref().unwrap().marker, index)
+            }
+        }
+
+        NoteReply {
+            root,
+            reply,
+            mention,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -21,12 +97,27 @@ pub struct NoteReply<'a> {
     mention: Option<NoteIdRef<'a>>,
 }
 
+/// Owned version of NoteReply, stores tag indices
+pub struct NoteReplyBuf {
+    root: Option<NoteIdRefBuf>,
+    reply: Option<NoteIdRefBuf>,
+    mention: Option<NoteIdRefBuf>,
+}
+
 impl<'a> NoteReply<'a> {
     pub fn reply_to_root(self) -> Option<NoteIdRef<'a>> {
         if self.is_reply_to_root() {
             self.root
         } else {
             None
+        }
+    }
+
+    pub fn to_owned(&self) -> NoteReplyBuf {
+        NoteReplyBuf {
+            root: self.root.map(|x| x.to_owned()),
+            reply: self.reply.map(|x| x.to_owned()),
+            mention: self.mention.map(|x| x.to_owned()),
         }
     }
 
@@ -76,13 +167,16 @@ fn tags_to_note_reply<'a>(tags: Tags<'a>) -> NoteReply<'a> {
     let mut reply: Option<NoteIdRef<'a>> = None;
     let mut mention: Option<NoteIdRef<'a>> = None;
     let mut first: bool = true;
+    let mut index: i32 = -1;
 
     for tag in tags {
+        index += 1;
+
         if root.is_some() && reply.is_some() && mention.is_some() {
             break;
         }
 
-        let note_ref = if let Ok(note_ref) = tag_to_noteid_ref(tag) {
+        let note_ref = if let Ok(note_ref) = tag_to_noteid_ref(tag, index as u16) {
             note_ref
         } else {
             continue;
@@ -117,7 +211,7 @@ fn tags_to_note_reply<'a>(tags: Tags<'a>) -> NoteReply<'a> {
     }
 }
 
-pub fn tag_to_noteid_ref(tag: Tag<'_>) -> Result<NoteIdRef<'_>, Error> {
+pub fn tag_to_noteid_ref(tag: Tag<'_>, index: u16) -> Result<NoteIdRef<'_>, Error> {
     if tag.count() < 2 {
         return Err(Error::DecodeError);
     }
@@ -132,13 +226,21 @@ pub fn tag_to_noteid_ref(tag: Tag<'_>) -> Result<NoteIdRef<'_>, Error> {
         .id()
         .ok_or(Error::DecodeError)?;
 
-    let relay = tag.get(2).and_then(|t| t.variant().str());
+    let relay = tag
+        .get(2)
+        .and_then(|t| t.variant().str())
+        .filter(|x| *x != "");
     let marker = tag
         .get(3)
         .and_then(|t| t.variant().str())
         .and_then(Marker::new);
 
-    Ok(NoteIdRef { id, relay, marker })
+    Ok(NoteIdRef {
+        index,
+        id,
+        relay,
+        marker,
+    })
 }
 
 #[cfg(test)]
@@ -360,11 +462,18 @@ mod test {
             assert_eq!(res, vec![NoteKey::new(1)]);
             let txn = Transaction::new(&ndb).unwrap();
             let res = ndb.query(&txn, vec![filter], 1).expect("note");
-            let note_reply = NoteReply::new(res[0].note.tags());
+            let note = &res[0].note;
+            let note_reply = NoteReply::new(note.tags());
 
             assert_eq!(*note_reply.reply_to_root().unwrap().id, root_id);
             assert_eq!(*note_reply.reply().unwrap().id, root_id);
             assert_eq!(note_reply.mention().is_none(), true);
+
+            // test the to_owned version
+            let back_again = note_reply.to_owned().borrow(note.tags());
+            assert_eq!(*back_again.reply_to_root().unwrap().id, root_id);
+            assert_eq!(*back_again.reply().unwrap().id, root_id);
+            assert_eq!(back_again.mention().is_none(), true);
         }
     }
 }

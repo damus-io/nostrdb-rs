@@ -40,6 +40,6 @@ pub use result::Result;
 pub use subscription::Subscription;
 pub use tags::{Tag, TagIter, Tags, TagsIter};
 pub use transaction::Transaction;
-pub use util::nip10::{Marker, NoteIdRef, NoteReply};
+pub use util::nip10::{Marker, NoteIdRef, NoteIdRefBuf, NoteReply, NoteReplyBuf};
 
 mod test_util;
