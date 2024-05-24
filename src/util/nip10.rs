@@ -111,9 +111,9 @@ pub struct NoteReply<'a> {
 
 /// Owned version of NoteReply, stores tag indices
 pub struct NoteReplyBuf {
-    root: Option<NoteIdRefBuf>,
-    reply: Option<NoteIdRefBuf>,
-    mention: Option<NoteIdRefBuf>,
+    pub root: Option<NoteIdRefBuf>,
+    pub reply: Option<NoteIdRefBuf>,
+    pub mention: Option<NoteIdRefBuf>,
 }
 
 impl<'a> NoteReply<'a> {
