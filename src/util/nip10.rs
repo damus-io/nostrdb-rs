@@ -8,7 +8,7 @@ pub enum Marker {
 }
 
 /// Parsed `e` tags
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NoteIdRef<'a> {
     pub index: u16,
     pub id: &'a [u8; 32],
@@ -25,6 +25,7 @@ impl<'a> NoteIdRef<'a> {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NoteIdRefBuf {
     pub index: u16,
     pub marker: Option<Marker>,
@@ -102,7 +103,7 @@ impl NoteReplyBuf {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NoteReply<'a> {
     root: Option<NoteIdRef<'a>>,
     reply: Option<NoteIdRef<'a>>,
@@ -110,6 +111,7 @@ pub struct NoteReply<'a> {
 }
 
 /// Owned version of NoteReply, stores tag indices
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NoteReplyBuf {
     pub root: Option<NoteIdRefBuf>,
     pub reply: Option<NoteIdRefBuf>,
