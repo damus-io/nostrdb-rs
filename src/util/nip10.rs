@@ -242,6 +242,7 @@ pub fn tag_to_noteid_ref(tag: Tag<'_>, index: u16) -> Result<NoteIdRef<'_>, Erro
         .get(2)
         .and_then(|t| t.variant().str())
         .filter(|x| !x.is_empty());
+
     let marker = tag
         .get(3)
         .and_then(|t| t.variant().str())
