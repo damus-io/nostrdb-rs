@@ -31,7 +31,11 @@ pub struct NoteIdRefBuf {
     pub marker: Option<Marker>,
 }
 
-fn tag_to_note_id_ref(tag: Tag<'_>, marker: Option<Marker>, index: i32) -> NoteIdRef<'_> {
+fn tag_to_note_id_ref<'a, 'b>(
+    tag: Tag<'a, 'b>,
+    marker: Option<Marker>,
+    index: i32,
+) -> NoteIdRef<'a> {
     let id = tag
         .get_unchecked(1)
         .variant()
@@ -50,7 +54,10 @@ impl NoteReplyBuf {
     // TODO(jb55): optimize this function. It is not the nicest code.
     // We could simplify the index lookup by offsets into the Note's
     // string table
-    pub fn borrow<'a>(&self, tags: Tags<'a>) -> NoteReply<'a> {
+    pub fn borrow<'a, 'b>(&self, tags: Tags<'a, 'b>) -> NoteReply<'a>
+    where
+        'b: 'a,
+    {
         let mut root: Option<NoteIdRef<'a>> = None;
         let mut reply: Option<NoteIdRef<'a>> = None;
         let mut mention: Option<NoteIdRef<'a>> = None;
@@ -135,7 +142,10 @@ impl<'a> NoteReply<'a> {
         }
     }
 
-    pub fn new(tags: Tags<'a>) -> NoteReply<'a> {
+    pub fn new<'b>(tags: Tags<'a, 'b>) -> NoteReply<'a>
+    where
+        'b: 'a,
+    {
         tags_to_note_reply(tags)
     }
 
@@ -180,7 +190,10 @@ impl Marker {
     }
 }
 
-fn tags_to_note_reply<'a>(tags: Tags<'a>) -> NoteReply<'a> {
+fn tags_to_note_reply<'a, 'b>(tags: Tags<'a, 'b>) -> NoteReply<'a>
+where
+    'b: 'a,
+{
     let mut root: Option<NoteIdRef<'a>> = None;
     let mut reply: Option<NoteIdRef<'a>> = None;
     let mut mention: Option<NoteIdRef<'a>> = None;
@@ -223,7 +236,7 @@ fn tags_to_note_reply<'a>(tags: Tags<'a>) -> NoteReply<'a> {
     }
 }
 
-pub fn tag_to_noteid_ref(tag: Tag<'_>, index: u16) -> Result<NoteIdRef<'_>, Error> {
+pub fn tag_to_noteid_ref<'a, 'b>(tag: Tag<'a, 'b>, index: u16) -> Result<NoteIdRef<'a>, Error> {
     if tag.count() < 2 {
         return Err(Error::DecodeError);
     }
