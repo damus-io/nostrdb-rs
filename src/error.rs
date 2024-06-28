@@ -9,6 +9,7 @@ pub enum Error {
     NoteProcessFailed,
     TransactionFailed,
     SubscriptionError,
+    BufferOverflow,
 }
 
 impl fmt::Display for Error {
@@ -21,6 +22,7 @@ impl fmt::Display for Error {
             Error::NoteProcessFailed => "Note process failed",
             Error::TransactionFailed => "Transaction failed",
             Error::SubscriptionError => "Subscription failed",
+            Error::BufferOverflow => "Buffer overflow",
         };
         write!(f, "{}", s)
     }

@@ -14,6 +14,8 @@ impl Config {
     pub fn new() -> Self {
         let mut config = bindings::ndb_config {
             filter_context: std::ptr::null_mut(),
+            sub_cb: None,
+            sub_cb_ctx: std::ptr::null_mut(),
             ingest_filter: None,
             flags: 0,
             ingester_threads: 0,

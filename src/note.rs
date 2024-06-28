@@ -1,6 +1,6 @@
-use crate::bindings;
 use crate::tags::Tags;
 use crate::transaction::Transaction;
+use crate::{bindings, Error};
 use ::std::os::raw::c_uchar;
 use std::hash::Hash;
 
@@ -127,11 +127,30 @@ impl<'a> Note<'a> {
         }
     }
 
-    /*
-    pub fn json() -> String {
-        unsafe { bindings::ndb_note_json() }
+    pub fn json_with_bufsize(&self, bufsize: usize) -> Result<String, Error> {
+        let mut buf = Vec::with_capacity(bufsize);
+        unsafe {
+            let size = bindings::ndb_note_json(
+                self.as_ptr(),
+                buf.as_mut_ptr() as *mut ::std::os::raw::c_char,
+                bufsize as ::std::os::raw::c_int,
+            ) as usize;
+
+            // Step 4: Check the return value for success
+            if size == 0 {
+                return Err(Error::BufferOverflow); // Handle the error appropriately
+            }
+
+            buf.set_len(size);
+
+            Ok(std::str::from_utf8_unchecked(&buf[..size - 1]).to_string())
+        }
     }
-    */
+
+    pub fn json(&self) -> Result<String, Error> {
+        // 1mb buffer
+        self.json_with_bufsize(1024usize * 1024usize)
+    }
 
     fn content_size(&self) -> usize {
         unsafe { bindings::ndb_note_content_length(self.as_ptr()) as usize }
@@ -506,5 +525,9 @@ mod tests {
             assert_eq!(tag.get_unchecked(1).variant().str().unwrap(), "something");
             break;
         }
+
+        let json = note.json().expect("note json");
+        // the signature changes so 267 is everything up until the signature
+        assert_eq!(&json[..267], "{\"id\":\"fb165be22c7b2518b749aabb7140c73f0887fe84475c82785700663be85ba859\",\"pubkey\":\"6c540ed060bfc2b0c5b6f09cd3ebedf980ef7bc836d69582361d20f2ad124f23\",\"created_at\":42,\"kind\":1,\"tags\":[[\"comment\",\"this is a comment\"],[\"blah\",\"something\"]],\"content\":\"this is the content\"");
     }
 }

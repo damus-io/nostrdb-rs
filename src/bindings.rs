@@ -2663,6 +2663,8 @@ pub type ndb_id_fn = ::std::option::Option<
         arg2: *const ::std::os::raw::c_char,
     ) -> ndb_idres,
 >;
+pub type ndb_sub_fn =
+    ::std::option::Option<unsafe extern "C" fn(arg1: *mut ::std::os::raw::c_void, subid: u64)>;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ndb_id_cb {
@@ -3538,6 +3540,8 @@ pub struct ndb_config {
     pub mapsize: usize,
     pub filter_context: *mut ::std::os::raw::c_void,
     pub ingest_filter: ndb_ingest_filter_fn,
+    pub sub_cb_ctx: *mut ::std::os::raw::c_void,
+    pub sub_cb: ndb_sub_fn,
 }
 #[test]
 fn bindgen_test_layout_ndb_config() {
@@ -3545,7 +3549,7 @@ fn bindgen_test_layout_ndb_config() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<ndb_config>(),
-        32usize,
+        48usize,
         concat!("Size of: ", stringify!(ndb_config))
     );
     assert_eq!(
@@ -3601,6 +3605,26 @@ fn bindgen_test_layout_ndb_config() {
             stringify!(ndb_config),
             "::",
             stringify!(ingest_filter)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).sub_cb_ctx) as usize - ptr as usize },
+        32usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_config),
+            "::",
+            stringify!(sub_cb_ctx)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).sub_cb) as usize - ptr as usize },
+        40usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_config),
+            "::",
+            stringify!(sub_cb)
         )
     );
 }
@@ -4795,6 +4819,13 @@ extern "C" {
     );
 }
 extern "C" {
+    pub fn ndb_config_set_subscription_callback(
+        config: *mut ndb_config,
+        fn_: ndb_sub_fn,
+        ctx: *mut ::std::os::raw::c_void,
+    );
+}
+extern "C" {
     pub fn ndb_calculate_id(
         note: *mut ndb_note,
         buf: *mut ::std::os::raw::c_uchar,
@@ -5097,7 +5128,10 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
-    pub fn ndb_unsubscribe(subid: ::std::os::raw::c_int) -> ::std::os::raw::c_int;
+    pub fn ndb_unsubscribe(arg1: *mut ndb, subid: u64) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_num_subscriptions(arg1: *mut ndb) -> ::std::os::raw::c_int;
 }
 extern "C" {
     pub fn ndb_text_search(
@@ -5170,6 +5204,14 @@ extern "C" {
 }
 extern "C" {
     pub fn ndb_str_len(str_: *mut ndb_str) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    #[doc = " write the note as json to a buffer"]
+    pub fn ndb_note_json(
+        arg1: *mut ndb_note,
+        buf: *mut ::std::os::raw::c_char,
+        buflen: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
 }
 extern "C" {
     pub fn ndb_tags_iterate_start(note: *mut ndb_note, iter: *mut ndb_iterator);
