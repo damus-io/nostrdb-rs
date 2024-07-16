@@ -187,6 +187,13 @@ impl FilterBuilder {
         self
     }
 
+    pub fn event(&mut self, id: &[u8; 32]) -> &mut Self {
+        self.start_tag_field('e');
+        self.add_id_element(id);
+        self.end_field();
+        self
+    }
+
     pub fn ids(&mut self, ids: Vec<[u8; 32]>) -> &mut Self {
         self.start_ids_field();
         for ref id in ids {
