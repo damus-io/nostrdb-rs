@@ -74,15 +74,19 @@ fn main() {
         ])
         .include("nostrdb/deps/lmdb")
         .include("nostrdb/deps/flatcc/include")
-        .include("nostrdb/deps/secp256k1/include")
+        .include("nostrdb/deps/secp256k1/include");
         // Add other include paths
         //.flag("-Wall")
-        .flag("-Wno-sign-compare")
-        .flag("-Wno-misleading-indentation")
-        .flag("-Wno-unused-function")
-        .flag("-Wno-unused-parameter");
     //.flag("-Werror")
     //.flag("-g")
+
+    // Link Security framework on macOS
+    if !cfg!(target_os = "windows") {
+        build.flag("-Wno-sign-compare")
+             .flag("-Wno-misleading-indentation")
+             .flag("-Wno-unused-function")
+             .flag("-Wno-unused-parameter");
+    }
 
     if env::var("PROFILE").unwrap() == "debug" {
         build.flag("-DDEBUG");
