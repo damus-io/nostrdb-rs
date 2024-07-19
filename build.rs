@@ -1,4 +1,4 @@
-// build.rs
+﻿// build.rs
 use cc::Build;
 use std::env;
 use std::path::PathBuf;
@@ -14,6 +14,7 @@ fn secp256k1_build() {
         .flag_if_supported("-Wno-unused-parameter") // patching out printf causes this warning
         //.define("SECP256K1_API", Some(""))
         .define("ENABLE_MODULE_ECDH", Some("1"))
+        .define("SECP256K1_STATIC", Some("1"))
         .define("ENABLE_MODULE_SCHNORRSIG", Some("1"))
         .define("ENABLE_MODULE_EXTRAKEYS", Some("1"));
     //.define("ENABLE_MODULE_ELLSWIFT", Some("1"))
@@ -34,13 +35,28 @@ fn secp256k1_build() {
         base_config.flag("-O1");
     }
 
-    if base_config.try_compile("libsecp256k1.a").is_err() {
-        // Some embedded platforms may not have, eg, string.h available, so if the build fails
-        // simply try again with the wasm sysroot (but without the wasm type sizes) in the hopes
-        // that it works.
-        base_config.include("wasm/wasm-sysroot");
-        base_config.compile("libsecp256k1.a");
-    }
+    base_config.compile("libsecp256k1.a");
+
+    println!("cargo:rustc-link-lib=static=secp256k1");
+}
+
+/// bolt11 deps with portability issues, exclude these on windows build
+fn bolt11_deps() -> &'static [&'static str] {
+    return &[
+        "nostrdb/ccan/ccan/likely/likely.c",
+        "nostrdb/ccan/ccan/list/list.c",
+        "nostrdb/ccan/ccan/mem/mem.c",
+        "nostrdb/ccan/ccan/str/debug.c",
+        "nostrdb/ccan/ccan/str/str.c",
+        "nostrdb/ccan/ccan/take/take.c",
+        "nostrdb/ccan/ccan/tal/str/str.c",
+        "nostrdb/ccan/ccan/tal/tal.c",
+        "nostrdb/ccan/ccan/utf8/utf8.c",
+
+        "nostrdb/src/bolt11/bolt11.c",
+        "nostrdb/src/bolt11/amount.c",
+        "nostrdb/src/bolt11/hash_u5.c",
+    ]
 }
 
 fn main() {
@@ -50,30 +66,11 @@ fn main() {
     build
         .files([
             "nostrdb/src/nostrdb.c",
-            "nostrdb/src/bolt11/bolt11.c",
-            "nostrdb/src/bolt11/amount.c",
-            "nostrdb/src/bolt11/bech32.c",
-            "nostrdb/src/bolt11/hash_u5.c",
             "nostrdb/src/invoice.c",
             "nostrdb/src/nostr_bech32.c",
             "nostrdb/src/content_parser.c",
             "nostrdb/ccan/ccan/crypto/sha256/sha256.c",
-            //"nostrdb/ccan/ccan/htable/htable.c",
-            //"nostrdb/ccan/ccan/htable/tools/density.c",
-            //"nostrdb/ccan/ccan/htable/tools/hsearchspeed.c",
-            //"nostrdb/ccan/ccan/htable/tools/speed.c",
-            //"nostrdb/ccan/ccan/htable/tools/stringspeed.c",
-            "nostrdb/ccan/ccan/likely/likely.c",
-            "nostrdb/ccan/ccan/list/list.c",
-            "nostrdb/ccan/ccan/mem/mem.c",
-            "nostrdb/ccan/ccan/str/debug.c",
-            "nostrdb/ccan/ccan/str/str.c",
-            "nostrdb/ccan/ccan/take/take.c",
-            //"nostrdb/ccan/ccan/tal/benchmark/samba-allocs.c",
-            //"nostrdb/ccan/ccan/tal/benchmark/speed.c",
-            "nostrdb/ccan/ccan/tal/str/str.c",
-            "nostrdb/ccan/ccan/tal/tal.c",
-            "nostrdb/ccan/ccan/utf8/utf8.c",
+            "nostrdb/src/bolt11/bech32.c",
             "nostrdb/src/block.c",
             "nostrdb/deps/flatcc/src/runtime/json_parser.c",
             "nostrdb/deps/flatcc/src/runtime/verifier.c",
@@ -83,19 +80,28 @@ fn main() {
             "nostrdb/deps/lmdb/mdb.c",
             "nostrdb/deps/lmdb/midl.c",
         ])
+        .define("SECP256K1_STATIC", Some("1"))
         .include("nostrdb/deps/lmdb")
         .include("nostrdb/deps/flatcc/include")
         .include("nostrdb/deps/secp256k1/include")
         .include("nostrdb/ccan")
-        .include("nostrdb/src")
+        .include("nostrdb/src");
         // Add other include paths
         //.flag("-Wall")
-        .flag("-Wno-sign-compare")
-        .flag("-Wno-misleading-indentation")
-        .flag("-Wno-unused-function")
-        .flag("-Wno-unused-parameter");
     //.flag("-Werror")
     //.flag("-g")
+
+    // Link Security framework on macOS
+    if !cfg!(target_os = "windows") {
+        build.files(bolt11_deps());
+        build.flag("-Wno-sign-compare")
+             .flag("-Wno-misleading-indentation")
+             .flag("-Wno-unused-function")
+             .flag("-Wno-unused-parameter");
+    } else {
+        // need this on windows
+        println!("cargo:rustc-link-lib=bcrypt");
+    }
 
     if env::var("PROFILE").unwrap() == "debug" {
         build.flag("-DDEBUG");
@@ -110,8 +116,6 @@ fn main() {
     for file in &["nostrdb/src/nostrdb.c", "nostrdb/src/nostrdb.h"] {
         println!("cargo:rerun-if-changed={}", file);
     }
-
-    println!("cargo:rustc-link-lib=secp256k1");
 
     // Print out the path to the compiled library
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
