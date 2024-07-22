@@ -111,6 +111,12 @@ impl Ndb {
         }
     }
 
+    pub fn subscription_count(&self) -> u32 {
+        unsafe {
+            bindings::ndb_num_subscriptions(self.as_ptr()) as u32
+        }
+    }
+
     pub fn subscribe(&self, filters: Vec<Filter>) -> Result<Subscription> {
         unsafe {
             let mut ndb_filters: Vec<bindings::ndb_filter> =
