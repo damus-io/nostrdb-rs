@@ -279,7 +279,7 @@ mod test {
                     .try_into()
                     .unwrap();
             let sub = ndb.subscribe(vec![filter.clone()]).expect("sub_id");
-            let waiter = ndb.wait_for_notes(&sub, 1);
+            let waiter = ndb.wait_for_notes(sub.id, 1);
 
             ndb.process_event(r#"
             [
@@ -333,7 +333,7 @@ mod test {
                     .try_into()
                     .unwrap();
             let sub = ndb.subscribe(vec![filter.clone()]).expect("sub_id");
-            let waiter = ndb.wait_for_notes(&sub, 1);
+            let waiter = ndb.wait_for_notes(sub.id, 1);
 
             ndb.process_event(r#"
             [
@@ -391,7 +391,7 @@ mod test {
                     .try_into()
                     .unwrap();
             let sub = ndb.subscribe(vec![filter.clone()]).expect("sub_id");
-            let waiter = ndb.wait_for_notes(&sub, 1);
+            let waiter = ndb.wait_for_notes(sub.id, 1);
 
             ndb.process_event(r#"
             [
@@ -454,7 +454,7 @@ mod test {
                     .try_into()
                     .unwrap();
             let sub = ndb.subscribe(vec![filter.clone()]).expect("sub_id");
-            let waiter = ndb.wait_for_notes(&sub, 1);
+            let waiter = ndb.wait_for_notes(sub.id, 1);
 
             ndb.process_event(r#"
             [
@@ -536,7 +536,7 @@ mod test {
                     .try_into()
                     .unwrap();
             let sub = ndb.subscribe(vec![filter.clone()]).expect("sub_id");
-            let waiter = ndb.wait_for_notes(&sub, 1);
+            let waiter = ndb.wait_for_notes(sub.id, 1);
 
             ndb.process_event(r#"
             [

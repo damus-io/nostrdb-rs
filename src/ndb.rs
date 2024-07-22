@@ -128,10 +128,9 @@ impl Ndb {
         }
     }
 
-    pub fn poll_for_notes(&self, sub: &Subscription, max_notes: u32) -> Vec<NoteKey> {
+    pub fn poll_for_notes(&self, sub_id: u64, max_notes: u32) -> Vec<NoteKey> {
         let mut vec = vec![];
         vec.reserve_exact(max_notes as usize);
-        let sub_id = sub.id;
 
         unsafe {
             let res = bindings::ndb_poll_for_notes(
@@ -146,9 +145,8 @@ impl Ndb {
         vec.into_iter().map(NoteKey::new).collect()
     }
 
-    pub async fn wait_for_notes(&self, sub: &Subscription, max_notes: u32) -> Result<Vec<NoteKey>> {
+    pub async fn wait_for_notes(&self, sub_id: u64, max_notes: u32) -> Result<Vec<NoteKey>> {
         let ndb = self.clone();
-        let sub_id = sub.id;
         let handle = task::spawn_blocking(move || {
             let mut vec: Vec<u64> = vec![];
             vec.reserve_exact(max_notes as usize);
@@ -356,7 +354,7 @@ mod tests {
             let filters = vec![filter];
 
             let sub = ndb.subscribe(filters.clone()).expect("sub_id");
-            let waiter = ndb.wait_for_notes(&sub, 1);
+            let waiter = ndb.wait_for_notes(sub.id, 1);
             ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
             let res = waiter.await.expect("await ok");
             assert_eq!(res, vec![NoteKey::new(1)]);
@@ -381,7 +379,7 @@ mod tests {
             let filter = Filter::new().kinds(vec![1]).build();
 
             let sub = ndb.subscribe(vec![filter]).expect("sub_id");
-            let waiter = ndb.wait_for_notes(&sub, 1);
+            let waiter = ndb.wait_for_notes(sub.id, 1);
             ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
             let res = waiter.await.expect("await ok");
             assert_eq!(res, vec![NoteKey::new(1)]);
@@ -401,12 +399,12 @@ mod tests {
             let sub = ndb.subscribe(vec![filter]).expect("sub_id");
             ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
             // this is too fast, we should have nothing
-            let res = ndb.poll_for_notes(&sub, 1);
+            let res = ndb.poll_for_notes(sub.id, 1);
             assert_eq!(res, vec![]);
 
             std::thread::sleep(std::time::Duration::from_millis(100));
             // now we should have something
-            let res = ndb.poll_for_notes(&sub, 1);
+            let res = ndb.poll_for_notes(sub.id, 1);
             assert_eq!(res, vec![NoteKey::new(1)]);
         }
     }
