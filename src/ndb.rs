@@ -117,6 +117,18 @@ impl Ndb {
         }
     }
 
+    pub fn unsubscribe(&self, sub_id: u64) -> Result<()> {
+        let r = unsafe {
+            bindings::ndb_unsubscribe(self.as_ptr(), sub_id)
+        };
+
+        if r == 0 {
+            Err(Error::SubscriptionError)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn subscribe(&self, filters: Vec<Filter>) -> Result<Subscription> {
         unsafe {
             let mut ndb_filters: Vec<bindings::ndb_filter> =
