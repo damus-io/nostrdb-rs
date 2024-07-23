@@ -3,11 +3,11 @@ use crate::{bindings, NdbStr, Note};
 #[derive(Debug, Clone)]
 pub struct Tag<'n> {
     ptr: *mut bindings::ndb_tag,
-    note: &'n Note<'n>,
+    note: Note<'n>,
 }
 
 impl<'n> Tag<'n> {
-    pub(crate) fn new(ptr: *mut bindings::ndb_tag, note: &'n Note<'n>) -> Self {
+    pub(crate) fn new(ptr: *mut bindings::ndb_tag, note: Note<'n>) -> Self {
         Tag { ptr, note }
     }
 
@@ -23,7 +23,7 @@ impl<'n> Tag<'n> {
                 ind as ::std::os::raw::c_int,
             )
         };
-        NdbStr::new(nstr, self.note)
+        NdbStr::new(nstr, self.note.clone())
     }
 
     pub fn get(&self, ind: u16) -> Option<NdbStr<'n>> {
@@ -33,8 +33,8 @@ impl<'n> Tag<'n> {
         Some(self.get_unchecked(ind))
     }
 
-    pub fn note(&'n self) -> &'n Note<'n> {
-        self.note
+    pub fn note(&self) -> &Note<'n> {
+        &self.note
     }
 
     pub fn as_ptr(&self) -> *mut bindings::ndb_tag {
@@ -54,7 +54,7 @@ impl<'a> IntoIterator for Tag<'a> {
 #[derive(Debug, Clone)]
 pub struct Tags<'a> {
     ptr: *mut bindings::ndb_tags,
-    note: &'a Note<'a>,
+    note: Note<'a>,
 }
 
 impl<'a> IntoIterator for Tags<'a> {
@@ -62,12 +62,12 @@ impl<'a> IntoIterator for Tags<'a> {
     type IntoIter = TagsIter<'a>;
 
     fn into_iter(self) -> TagsIter<'a> {
-        TagsIter::new(self.note())
+        TagsIter::new(self.note().clone())
     }
 }
 
 impl<'a> Tags<'a> {
-    pub(crate) fn new(ptr: *mut bindings::ndb_tags, note: &'a Note<'a>) -> Self {
+    pub(crate) fn new(ptr: *mut bindings::ndb_tags, note: Note<'a>) -> Self {
         Tags { ptr, note }
     }
 
@@ -76,11 +76,11 @@ impl<'a> Tags<'a> {
     }
 
     pub fn iter(&self) -> TagsIter<'a> {
-        TagsIter::new(self.note)
+        TagsIter::new(self.note.clone())
     }
 
-    pub fn note(&self) -> &'a Note<'a> {
-        self.note
+    pub fn note(&self) -> &Note<'a> {
+        &self.note
     }
 
     pub fn as_ptr(&self) -> *mut bindings::ndb_tags {
@@ -91,11 +91,11 @@ impl<'a> Tags<'a> {
 #[derive(Debug, Clone)]
 pub struct TagsIter<'a> {
     iter: bindings::ndb_iterator,
-    note: &'a Note<'a>,
+    note: Note<'a>,
 }
 
 impl<'a> TagsIter<'a> {
-    pub fn new(note: &'a Note<'a>) -> Self {
+    pub fn new(note: Note<'a>) -> Self {
         let iter = bindings::ndb_iterator {
             note: std::ptr::null_mut(),
             tag: std::ptr::null_mut(),
@@ -103,7 +103,7 @@ impl<'a> TagsIter<'a> {
         };
         let mut iter = TagsIter { note, iter };
         unsafe {
-            bindings::ndb_tags_iterate_start(note.as_ptr(), &mut iter.iter);
+            bindings::ndb_tags_iterate_start(iter.note.as_ptr(), &mut iter.iter);
         };
         iter
     }
@@ -113,12 +113,12 @@ impl<'a> TagsIter<'a> {
         if tag_ptr.is_null() {
             None
         } else {
-            Some(Tag::new(tag_ptr, self.note()))
+            Some(Tag::new(tag_ptr, self.note().clone()))
         }
     }
 
-    pub fn note(&self) -> &'a Note<'a> {
-        self.note
+    pub fn note(&self) -> &Note<'a> {
+        &self.note
     }
 
     pub fn as_ptr(&self) -> *const bindings::ndb_iterator {

@@ -192,9 +192,9 @@ impl<'a> Note<'a> {
         unsafe { bindings::ndb_note_kind(self.as_ptr()) }
     }
 
-    pub fn tags(&'a self) -> Tags<'a> {
+    pub fn tags(&self) -> Tags<'a> {
         let tags = unsafe { bindings::ndb_note_tags(self.as_ptr()) };
-        Tags::new(tags, self)
+        Tags::new(tags, self.clone())
     }
 
     pub fn sig(&self) -> &'a [u8; 64] {
