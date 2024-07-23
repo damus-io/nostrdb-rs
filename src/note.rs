@@ -46,52 +46,184 @@ impl<'a> NoteBuildOptions<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum Note<'a> {
-    /// A note in-memory outside of nostrdb. This note is a pointer to a note in
-    /// memory and will be free'd when [Drop]ped. Method such as [Note::from_json]
-    /// will create owned notes in memory.
-    ///
-    /// [Drop]: std::ops::Drop
-    Owned {
-        ptr: *mut bindings::ndb_note,
-        size: usize,
-    },
+#[derive(Copy, Clone, Debug)]
+pub struct NdbNote {
+    ptr: *mut bindings::ndb_note,
+}
 
-    /// A note inside of nostrdb. Tied to the lifetime of a
-    /// [Transaction] to ensure no reading of data outside
-    /// of a transaction.
-    Transactional {
-        ptr: *mut bindings::ndb_note,
-        size: usize,
-        key: NoteKey,
-        transaction: &'a Transaction,
-    },
+/// A transactional nostrdb [`Note`]. Only valid for the duration of a
+/// transaction
+#[derive(Debug, Clone)]
+pub struct Note<'a> {
+    ptr: NdbNote,
+    size: usize,
+    key: NoteKey,
+    transaction: &'a Transaction,
+}
+
+#[derive(Debug)]
+pub struct NoteBuf {
+    ptr: NdbNote,
+    size: usize,
+}
+
+impl NoteBuf {
+    pub(crate) fn new(ptr: *mut bindings::ndb_note, size: usize) -> Self {
+        let ptr = NdbNote::new(ptr);
+        NoteBuf { ptr, size }
+    }
+
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    #[inline]
+    pub fn ndb_note(&self) -> NdbNote {
+        self.ptr
+    }
+
+    #[inline]
+    pub fn as_ptr(&self) -> *mut bindings::ndb_note {
+        self.ndb_note().as_ptr()
+    }
+
+    #[inline]
+    pub fn as_mut_ptr(&mut self) -> *mut bindings::ndb_note {
+        self.as_ptr()
+    }
+
+    #[inline]
+    pub fn content_size(&self) -> usize {
+        unsafe { bindings::ndb_note_content_length(self.as_ptr()) as usize }
+    }
+
+    #[inline]
+    pub fn created_at(&self) -> u64 {
+        unsafe { bindings::ndb_note_created_at(self.as_ptr()).into() }
+    }
+
+    #[inline]
+    pub fn content_ptr(&self) -> *const ::std::os::raw::c_char {
+        unsafe { bindings::ndb_note_content(self.as_ptr()) }
+    }
+
+    /// Get the note pubkey
+    #[inline]
+    pub fn pubkey(&self) -> &[u8; 32] {
+        unsafe {
+            let ptr = bindings::ndb_note_pubkey(self.as_ptr());
+            &*(ptr as *const [u8; 32])
+        }
+    }
+
+    #[inline]
+    pub fn id(&self) -> &[u8; 32] {
+        unsafe {
+            let ptr = bindings::ndb_note_id(self.as_ptr());
+            &*(ptr as *const [u8; 32])
+        }
+    }
+
+    #[inline]
+    pub fn kind(&self) -> u32 {
+        unsafe { bindings::ndb_note_kind(self.as_ptr()) }
+    }
+
+    #[inline]
+    pub fn sig(&self) -> &[u8; 64] {
+        unsafe {
+            let ptr = bindings::ndb_note_sig(self.as_ptr());
+            &*(ptr as *const [u8; 64])
+        }
+    }
+}
+
+impl NdbNote {
+    pub fn new(ptr: *mut bindings::ndb_note) -> Self {
+        NdbNote { ptr }
+    }
+
+    #[inline]
+    pub fn as_ptr(&self) -> *mut bindings::ndb_note {
+        self.ptr
+    }
+
+    #[inline]
+    pub fn as_mut_ptr(&mut self) -> *mut bindings::ndb_note {
+        self.as_ptr()
+    }
+
+    /// Get the [`Note`] contents.
+    #[inline]
+    pub fn content(&self) -> &str {
+        unsafe {
+            let content = self.content_ptr();
+            let byte_slice = std::slice::from_raw_parts(content as *const u8, self.content_size());
+            std::str::from_utf8_unchecked(byte_slice)
+        }
+    }
+
+    #[inline]
+    fn content_size(&self) -> usize {
+        unsafe { bindings::ndb_note_content_length(self.as_ptr()) as usize }
+    }
+
+    #[inline]
+    pub fn created_at(&self) -> u64 {
+        unsafe { bindings::ndb_note_created_at(self.as_ptr()).into() }
+    }
+
+    #[inline]
+    pub fn content_ptr(&self) -> *const ::std::os::raw::c_char {
+        unsafe { bindings::ndb_note_content(self.as_ptr()) }
+    }
+
+    /// Get the note pubkey
+    #[inline]
+    pub fn pubkey(&self) -> *const [u8; 32] {
+        unsafe {
+            let ptr = bindings::ndb_note_pubkey(self.as_ptr());
+            ptr as *const [u8; 32]
+        }
+    }
+
+    #[inline]
+    pub fn id(&self) -> *const [u8; 32] {
+        unsafe {
+            let ptr = bindings::ndb_note_id(self.as_ptr());
+            ptr as *const [u8; 32]
+        }
+    }
+
+    #[inline]
+    pub fn kind(&self) -> u32 {
+        unsafe { bindings::ndb_note_kind(self.as_ptr()) }
+    }
+
+    #[inline]
+    pub fn sig(&self) -> *const [u8; 64] {
+        unsafe {
+            let ptr = bindings::ndb_note_sig(self.as_ptr());
+            ptr as *const [u8; 64]
+        }
+    }
 }
 
 impl<'a> Note<'a> {
-    /// Constructs an owned `Note`. This note is a pointer to a note in
-    /// memory and will be free'd when [Drop]ped. You normally wouldn't
-    /// use this method directly, public consumer would use from_json instead.
-    ///
-    /// [Drop]: std::ops::Drop
-    #[allow(dead_code)]
-    pub(crate) fn new_owned(ptr: *mut bindings::ndb_note, size: usize) -> Note<'static> {
-        Note::Owned { ptr, size }
-    }
-
     /// Constructs a `Note` in a transactional context.
     /// Use [Note::new_transactional] to create a new transactional note.
     /// You normally wouldn't use this method directly, it is used by
     /// functions that get notes from the database like
     /// [ndb_get_note_by_id]
-    pub(crate) fn new_transactional(
+    pub(crate) fn new(
         ptr: *mut bindings::ndb_note,
         size: usize,
         key: NoteKey,
         transaction: &'a Transaction,
     ) -> Note<'a> {
-        Note::Transactional {
+        let ptr = NdbNote::new(ptr);
+        Note {
             ptr,
             size,
             key,
@@ -99,32 +231,29 @@ impl<'a> Note<'a> {
         }
     }
 
-    pub fn txn(&'a self) -> Option<&'a Transaction> {
-        match self {
-            Note::Transactional { transaction, .. } => Some(transaction),
-            _ => None,
-        }
+    #[inline]
+    pub fn txn(&self) -> &Transaction {
+        self.transaction
     }
 
-    pub fn key(&self) -> Option<NoteKey> {
-        match self {
-            Note::Transactional { key, .. } => Some(NoteKey::new(key.as_u64())),
-            _ => None,
-        }
+    #[inline]
+    pub fn key(&self) -> NoteKey {
+        self.key
     }
 
+    #[inline]
     pub fn size(&self) -> usize {
-        match self {
-            Note::Owned { size, .. } => *size,
-            Note::Transactional { size, .. } => *size,
-        }
+        self.size
     }
 
+    #[inline]
+    pub fn ndb_note(&self) -> NdbNote {
+        self.ptr
+    }
+
+    #[inline]
     pub fn as_ptr(&self) -> *mut bindings::ndb_note {
-        match self {
-            Note::Owned { ptr, .. } => *ptr,
-            Note::Transactional { ptr, .. } => *ptr,
-        }
+        self.ptr.as_ptr()
     }
 
     pub fn json_with_bufsize(&self, bufsize: usize) -> Result<String, Error> {
@@ -147,24 +276,29 @@ impl<'a> Note<'a> {
         }
     }
 
+    #[inline]
     pub fn json(&self) -> Result<String, Error> {
         // 1mb buffer
         self.json_with_bufsize(1024usize * 1024usize)
     }
 
+    #[inline]
     fn content_size(&self) -> usize {
-        unsafe { bindings::ndb_note_content_length(self.as_ptr()) as usize }
+        self.ndb_note().content_size()
     }
 
+    #[inline]
     pub fn created_at(&self) -> u64 {
-        unsafe { bindings::ndb_note_created_at(self.as_ptr()).into() }
+        self.ndb_note().created_at()
     }
 
+    #[inline]
     pub fn content_ptr(&self) -> *const ::std::os::raw::c_char {
-        unsafe { bindings::ndb_note_content(self.as_ptr()) }
+        self.ndb_note().content_ptr()
     }
 
     /// Get the [`Note`] contents.
+    #[inline]
     pub fn content(&self) -> &'a str {
         unsafe {
             let content = self.content_ptr();
@@ -174,42 +308,37 @@ impl<'a> Note<'a> {
     }
 
     /// Get the note pubkey
+    #[inline]
     pub fn pubkey(&self) -> &'a [u8; 32] {
-        unsafe {
-            let ptr = bindings::ndb_note_pubkey(self.as_ptr());
-            &*(ptr as *const [u8; 32])
-        }
+        unsafe { &*(self.ndb_note().pubkey()) }
     }
 
+    /// Get the note pubkey
+    #[inline]
     pub fn id(&self) -> &'a [u8; 32] {
-        unsafe {
-            let ptr = bindings::ndb_note_id(self.as_ptr());
-            &*(ptr as *const [u8; 32])
-        }
+        unsafe { &*(self.ndb_note().id()) }
     }
 
+    #[inline]
     pub fn kind(&self) -> u32 {
-        unsafe { bindings::ndb_note_kind(self.as_ptr()) }
+        self.ndb_note().kind()
     }
 
+    #[inline]
     pub fn tags(&self) -> Tags<'a> {
         let tags = unsafe { bindings::ndb_note_tags(self.as_ptr()) };
         Tags::new(tags, self.clone())
     }
 
+    #[inline]
     pub fn sig(&self) -> &'a [u8; 64] {
-        unsafe {
-            let ptr = bindings::ndb_note_sig(self.as_ptr());
-            &*(ptr as *const [u8; 64])
-        }
+        unsafe { &*(self.ndb_note().sig()) }
     }
 }
 
-impl<'a> Drop for Note<'a> {
+impl Drop for NoteBuf {
     fn drop(&mut self) {
-        if let Note::Owned { ptr, .. } = self {
-            unsafe { libc::free((*ptr) as *mut libc::c_void) }
-        }
+        unsafe { libc::free(self.as_mut_ptr() as *mut libc::c_void) }
     }
 }
 
@@ -390,7 +519,7 @@ impl<'a> NoteBuilder<'a> {
         self
     }
 
-    pub fn build(&mut self) -> Option<Note<'static>> {
+    pub fn build(&mut self) -> Option<NoteBuf> {
         let mut note_ptr: *mut bindings::ndb_note = std::ptr::null_mut();
         let mut keypair = bindings::ndb_keypair::default();
 
@@ -438,7 +567,7 @@ impl<'a> NoteBuilder<'a> {
             return None;
         }
 
-        Some(Note::new_owned(note_ptr, size))
+        Some(NoteBuf::new(note_ptr, size))
     }
 }
 

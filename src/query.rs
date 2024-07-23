@@ -10,7 +10,7 @@ pub struct QueryResult<'a> {
 impl<'a> QueryResult<'a> {
     pub fn new(result: &bindings::ndb_query_result, txn: &'a Transaction) -> Self {
         QueryResult {
-            note: Note::new_transactional(
+            note: Note::new(
                 result.note,
                 result.note_size as usize,
                 NoteKey::new(result.note_id),

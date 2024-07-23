@@ -293,12 +293,7 @@ impl Ndb {
         }
 
         // Convert the raw pointer to a Note instance
-        Ok(Note::new_transactional(
-            note_ptr,
-            len,
-            note_key,
-            transaction,
-        ))
+        Ok(Note::new(note_ptr, len, note_key, transaction))
     }
 
     /// Get a note from the database. Takes a [Transaction] and a 32-byte [Note] Id
@@ -325,12 +320,7 @@ impl Ndb {
         }
 
         // Convert the raw pointer to a Note instance
-        Ok(Note::new_transactional(
-            note_ptr,
-            len,
-            NoteKey::new(primkey),
-            transaction,
-        ))
+        Ok(Note::new(note_ptr, len, NoteKey::new(primkey), transaction))
     }
 
     /// Get the underlying pointer to the context in C

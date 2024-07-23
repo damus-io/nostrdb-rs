@@ -76,7 +76,7 @@ impl<'a> Tags<'a> {
     }
 
     pub fn iter(&self) -> TagsIter<'a> {
-        TagsIter::new(self.note.clone())
+        TagsIter::new(self.note().clone())
     }
 
     pub fn note(&self) -> &Note<'a> {

@@ -38,8 +38,8 @@ impl bindings::ndb_str {
 }
 
 impl<'a> NdbStr<'a> {
-    pub fn note(&self) -> &Note<'a> {
-        &self.note
+    pub fn note(self) -> Note<'a> {
+        self.note
     }
 
     pub(crate) fn new(ndb_str: bindings::ndb_str, note: Note<'a>) -> Self {
