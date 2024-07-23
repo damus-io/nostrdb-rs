@@ -336,7 +336,7 @@ mod tests {
             let pubkey_bytes: [u8; 32] = pubkey.try_into().expect("pubkey bytes");
             let note = ndb.get_note_by_id(&txn, &id_bytes).unwrap();
             let blocks = ndb
-                .get_blocks_by_key(&txn, note.key().unwrap())
+                .get_blocks_by_key(&txn, note.key())
                 .expect("note");
             let mut c = 0;
             for block in blocks.iter(&note) {

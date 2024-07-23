@@ -67,78 +67,6 @@ pub struct NoteBuf {
     size: usize,
 }
 
-impl NoteBuf {
-    pub(crate) fn new(ptr: *mut bindings::ndb_note, size: usize) -> Self {
-        let ptr = NdbNote::new(ptr);
-        NoteBuf { ptr, size }
-    }
-
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.size
-    }
-
-    #[inline]
-    pub fn ndb_note(&self) -> NdbNote {
-        self.ptr
-    }
-
-    #[inline]
-    pub fn as_ptr(&self) -> *mut bindings::ndb_note {
-        self.ndb_note().as_ptr()
-    }
-
-    #[inline]
-    pub fn as_mut_ptr(&mut self) -> *mut bindings::ndb_note {
-        self.as_ptr()
-    }
-
-    #[inline]
-    pub fn content_size(&self) -> usize {
-        unsafe { bindings::ndb_note_content_length(self.as_ptr()) as usize }
-    }
-
-    #[inline]
-    pub fn created_at(&self) -> u64 {
-        unsafe { bindings::ndb_note_created_at(self.as_ptr()).into() }
-    }
-
-    #[inline]
-    pub fn content_ptr(&self) -> *const ::std::os::raw::c_char {
-        unsafe { bindings::ndb_note_content(self.as_ptr()) }
-    }
-
-    /// Get the note pubkey
-    #[inline]
-    pub fn pubkey(&self) -> &[u8; 32] {
-        unsafe {
-            let ptr = bindings::ndb_note_pubkey(self.as_ptr());
-            &*(ptr as *const [u8; 32])
-        }
-    }
-
-    #[inline]
-    pub fn id(&self) -> &[u8; 32] {
-        unsafe {
-            let ptr = bindings::ndb_note_id(self.as_ptr());
-            &*(ptr as *const [u8; 32])
-        }
-    }
-
-    #[inline]
-    pub fn kind(&self) -> u32 {
-        unsafe { bindings::ndb_note_kind(self.as_ptr()) }
-    }
-
-    #[inline]
-    pub fn sig(&self) -> &[u8; 64] {
-        unsafe {
-            let ptr = bindings::ndb_note_sig(self.as_ptr());
-            &*(ptr as *const [u8; 64])
-        }
-    }
-}
-
 impl NdbNote {
     pub fn new(ptr: *mut bindings::ndb_note) -> Self {
         NdbNote { ptr }
@@ -208,6 +136,117 @@ impl NdbNote {
             ptr as *const [u8; 64]
         }
     }
+
+    pub fn json_with_bufsize(&self, bufsize: usize) -> Result<String, Error> {
+        let mut buf = Vec::with_capacity(bufsize);
+        unsafe {
+            let size = bindings::ndb_note_json(
+                self.as_ptr(),
+                buf.as_mut_ptr() as *mut ::std::os::raw::c_char,
+                bufsize as ::std::os::raw::c_int,
+            ) as usize;
+
+            // Step 4: Check the return value for success
+            if size == 0 {
+                return Err(Error::BufferOverflow); // Handle the error appropriately
+            }
+
+            buf.set_len(size);
+
+            Ok(std::str::from_utf8_unchecked(&buf[..size - 1]).to_string())
+        }
+    }
+
+    #[inline]
+    pub fn json(&self) -> Result<String, Error> {
+        // 1mb buffer
+        self.json_with_bufsize(1024usize * 1024usize)
+    }
+}
+
+
+impl NoteBuf {
+    #[inline]
+    pub(crate) fn new(ptr: *mut bindings::ndb_note, size: usize) -> Self {
+        let ptr = NdbNote::new(ptr);
+        NoteBuf { ptr, size }
+    }
+
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    #[inline]
+    pub fn ndb_note(&self) -> NdbNote {
+        self.ptr
+    }
+
+    #[inline]
+    pub fn as_ptr(&self) -> *mut bindings::ndb_note {
+        self.ndb_note().as_ptr()
+    }
+
+    #[inline]
+    pub fn as_mut_ptr(&mut self) -> *mut bindings::ndb_note {
+        self.as_ptr()
+    }
+
+    #[inline]
+    pub fn content_ptr(&self) -> *const ::std::os::raw::c_char {
+        self.ndb_note().content_ptr()
+    }
+
+    /// Get the note pubkey
+    #[inline]
+    pub fn pubkey(&self) -> &[u8; 32] {
+        unsafe { &*(self.ndb_note().pubkey()) }
+    }
+
+    #[inline]
+    pub fn created_at(&self) -> u64 {
+        self.ndb_note().created_at()
+    }
+
+    #[inline]
+    pub fn id(&self) -> &[u8; 32] {
+        unsafe { &*(self.ndb_note().id()) }
+    }
+
+    #[inline]
+    pub fn kind(&self) -> u32 {
+        self.ndb_note().kind()
+    }
+
+    #[inline]
+    pub fn sig(&self) -> &[u8; 64] {
+        unsafe { &*(self.ndb_note().sig()) }
+    }
+
+    #[inline]
+    fn content_size(&self) -> usize {
+        self.ndb_note().content_size()
+    }
+
+    /// Get the [`Note`] contents.
+    #[inline]
+    pub fn content(&self) -> &str {
+        unsafe {
+            let content = self.content_ptr();
+            let byte_slice = std::slice::from_raw_parts(content as *const u8, self.content_size());
+            std::str::from_utf8_unchecked(byte_slice)
+        }
+    }
+
+    #[inline]
+    pub fn json_with_bufsize(&self, bufsize: usize) -> Result<String, Error> {
+        self.ndb_note().json_with_bufsize(bufsize)
+    }
+
+    #[inline]
+    pub fn json(&self) -> Result<String, Error> {
+        self.ndb_note().json()
+    }
 }
 
 impl<'a> Note<'a> {
@@ -254,32 +293,6 @@ impl<'a> Note<'a> {
     #[inline]
     pub fn as_ptr(&self) -> *mut bindings::ndb_note {
         self.ptr.as_ptr()
-    }
-
-    pub fn json_with_bufsize(&self, bufsize: usize) -> Result<String, Error> {
-        let mut buf = Vec::with_capacity(bufsize);
-        unsafe {
-            let size = bindings::ndb_note_json(
-                self.as_ptr(),
-                buf.as_mut_ptr() as *mut ::std::os::raw::c_char,
-                bufsize as ::std::os::raw::c_int,
-            ) as usize;
-
-            // Step 4: Check the return value for success
-            if size == 0 {
-                return Err(Error::BufferOverflow); // Handle the error appropriately
-            }
-
-            buf.set_len(size);
-
-            Ok(std::str::from_utf8_unchecked(&buf[..size - 1]).to_string())
-        }
-    }
-
-    #[inline]
-    pub fn json(&self) -> Result<String, Error> {
-        // 1mb buffer
-        self.json_with_bufsize(1024usize * 1024usize)
     }
 
     #[inline]

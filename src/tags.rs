@@ -1,8 +1,45 @@
 use crate::{bindings, NdbStr, Note};
 
+pub struct NdbTag {
+    ptr: *mut bindings::ndb_tag,
+}
+
+impl NdbTag {
+    pub fn new(ptr: *mut bindings::ndb_tag) -> Self {
+        NdbTag { ptr }
+    }
+    
+    pub fn as_ptr(&self) -> *mut bindings::ndb_tag {
+        self.ptr
+    }
+
+    #[inline]
+    pub fn count(&self) -> u16 {
+        unsafe { bindings::ndb_tag_count(self.as_ptr()) }
+    }
+
+    pub fn get_unchecked(&self, ind: u16) -> NdbStr {
+        let nstr = unsafe {
+            bindings::ndb_tag_str(
+                self.note().as_ptr(),
+                self.as_ptr(),
+                ind as ::std::os::raw::c_int,
+            )
+        };
+        NdbStr::new(nstr, self.note.clone())
+    }
+
+    pub fn get(&self, ind: u16) -> Option<NdbStrBuf> {
+        if ind >= self.count() {
+            return None;
+        }
+        Some(self.get_unchecked(ind))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Tag<'n> {
-    ptr: *mut bindings::ndb_tag,
+    ndb_tag: NdbTag,
     note: Note<'n>,
 }
 
@@ -11,8 +48,13 @@ impl<'n> Tag<'n> {
         Tag { ptr, note }
     }
 
+    fn ndb_tag(self) -> NdbTag {
+        self.ndb_tag
+    }
+
+    #[inline]
     pub fn count(&self) -> u16 {
-        unsafe { bindings::ndb_tag_count(self.as_ptr()) }
+        self.ndb_tag().count()
     }
 
     pub fn get_unchecked(&self, ind: u16) -> NdbStr<'n> {
@@ -38,7 +80,7 @@ impl<'n> Tag<'n> {
     }
 
     pub fn as_ptr(&self) -> *mut bindings::ndb_tag {
-        self.ptr
+        self.ndb_tag().as_ptr()
     }
 }
 
