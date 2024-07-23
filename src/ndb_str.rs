@@ -2,7 +2,7 @@ use crate::{bindings, Note};
 
 pub struct NdbStr<'a> {
     ndb_str: bindings::ndb_str,
-    note: &'a Note<'a>,
+    note: Note<'a>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -39,10 +39,10 @@ impl bindings::ndb_str {
 
 impl<'a> NdbStr<'a> {
     pub fn note(&self) -> &Note<'a> {
-        self.note
+        &self.note
     }
 
-    pub(crate) fn new(ndb_str: bindings::ndb_str, note: &'a Note<'a>) -> Self {
+    pub(crate) fn new(ndb_str: bindings::ndb_str, note: Note<'a>) -> Self {
         NdbStr { ndb_str, note }
     }
 
