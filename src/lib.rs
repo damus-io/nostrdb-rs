@@ -29,7 +29,7 @@ mod util;
 pub use block::{Block, BlockType, Blocks, Mention};
 pub use config::Config;
 pub use error::Error;
-pub use filter::Filter;
+pub use filter::{Filter, FilterBuilder};
 pub use ndb::Ndb;
 pub use ndb_profile::{NdbProfile, NdbProfileRecord};
 pub use ndb_str::{NdbStr, NdbStrVariant};

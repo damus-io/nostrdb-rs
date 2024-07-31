@@ -202,7 +202,7 @@ impl FilterBuilder {
         unsafe { bindings::ndb_filter_end_field(self.as_mut_ptr()) }
     }
 
-    pub fn events(&mut self, events: Vec<[u8; 32]>) -> &mut Self {
+    pub fn events(mut self, events: Vec<[u8; 32]>) -> Self {
         self.start_tag_field('e');
         for ref id in events {
             self.add_id_element(id);
@@ -211,14 +211,14 @@ impl FilterBuilder {
         self
     }
 
-    pub fn event(&mut self, id: &[u8; 32]) -> &mut Self {
+    pub fn event(mut self, id: &[u8; 32]) -> Self {
         self.start_tag_field('e');
         self.add_id_element(id);
         self.end_field();
         self
     }
 
-    pub fn ids(&mut self, ids: Vec<[u8; 32]>) -> &mut Self {
+    pub fn ids(mut self, ids: Vec<[u8; 32]>) -> Self {
         self.start_ids_field();
         for ref id in ids {
             self.add_id_element(id);
@@ -227,7 +227,7 @@ impl FilterBuilder {
         self
     }
 
-    pub fn pubkeys(&mut self, pubkeys: Vec<[u8; 32]>) -> &mut Self {
+    pub fn pubkeys(mut self, pubkeys: Vec<[u8; 32]>) -> Self {
         self.start_tag_field('p');
         for ref pk in pubkeys {
             self.add_id_element(pk);
@@ -236,7 +236,7 @@ impl FilterBuilder {
         self
     }
 
-    pub fn authors(&mut self, authors: Vec<[u8; 32]>) -> &mut Self {
+    pub fn authors(mut self, authors: Vec<[u8; 32]>) -> Self {
         self.start_authors_field();
         for author in authors {
             self.add_id_element(&author);
@@ -245,7 +245,7 @@ impl FilterBuilder {
         self
     }
 
-    pub fn kinds(&mut self, kinds: Vec<u64>) -> &mut Self {
+    pub fn kinds(mut self, kinds: Vec<u64>) -> Self {
         self.start_kinds_field();
         for kind in kinds {
             self.add_int_element(kind);
@@ -254,7 +254,7 @@ impl FilterBuilder {
         self
     }
 
-    pub fn pubkey(&mut self, pubkeys: Vec<[u8; 32]>) -> &mut Self {
+    pub fn pubkey(mut self, pubkeys: Vec<[u8; 32]>) -> Self {
         self.start_pubkeys_field();
         for ref pubkey in pubkeys {
             self.add_id_element(pubkey);
@@ -263,7 +263,7 @@ impl FilterBuilder {
         self
     }
 
-    pub fn tags(&mut self, tags: Vec<String>, tag: char) -> &mut Self {
+    pub fn tags(mut self, tags: Vec<String>, tag: char) -> Self {
         self.start_tag_field(tag);
         for tag in tags {
             self.add_str_element(&tag);
@@ -272,21 +272,21 @@ impl FilterBuilder {
         self
     }
 
-    pub fn since(&mut self, since: u64) -> &mut Self {
+    pub fn since(mut self, since: u64) -> Self {
         self.start_since_field();
         self.add_int_element(since);
         self.end_field();
         self
     }
 
-    pub fn until(&mut self, until: u64) -> &mut Self {
+    pub fn until(mut self, until: u64) -> Self {
         self.start_until_field();
         self.add_int_element(until);
         self.end_field();
         self
     }
 
-    pub fn limit(&mut self, limit: u64) -> &mut Self {
+    pub fn limit(mut self, limit: u64) -> Self {
         self.start_limit_field();
         self.add_int_element(limit);
         self.end_field();
