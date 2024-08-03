@@ -112,15 +112,11 @@ impl Ndb {
     }
 
     pub fn subscription_count(&self) -> u32 {
-        unsafe {
-            bindings::ndb_num_subscriptions(self.as_ptr()) as u32
-        }
+        unsafe { bindings::ndb_num_subscriptions(self.as_ptr()) as u32 }
     }
 
     pub fn unsubscribe(&self, sub_id: u64) -> Result<()> {
-        let r = unsafe {
-            bindings::ndb_unsubscribe(self.as_ptr(), sub_id)
-        };
+        let r = unsafe { bindings::ndb_unsubscribe(self.as_ptr(), sub_id) };
 
         if r == 0 {
             Err(Error::SubscriptionError)
