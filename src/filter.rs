@@ -1,5 +1,4 @@
-use crate::bindings;
-use crate::Note;
+use crate::{bindings, Error, Note};
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::ptr::null_mut;
@@ -87,6 +86,31 @@ impl Filter {
 
     pub fn as_mut_ptr(&mut self) -> *mut bindings::ndb_filter {
         self.data.as_mut_ptr()
+    }
+
+    pub fn json_with_bufsize(&self, bufsize: usize) -> Result<String, Error> {
+        let mut buf = Vec::with_capacity(bufsize);
+        unsafe {
+            let size = bindings::ndb_filter_json(
+                self.as_ptr(),
+                buf.as_mut_ptr() as *mut ::std::os::raw::c_char,
+                bufsize as ::std::os::raw::c_int,
+            ) as usize;
+
+            // Step 4: Check the return value for success
+            if size == 0 {
+                return Err(Error::BufferOverflow); // Handle the error appropriately
+            }
+
+            buf.set_len(size);
+
+            Ok(std::str::from_utf8_unchecked(&buf[..size - 1]).to_string())
+        }
+    }
+
+    pub fn json(&self) -> Result<String, Error> {
+        // 1mb buffer
+        self.json_with_bufsize(1024usize * 1024usize)
     }
 }
 
