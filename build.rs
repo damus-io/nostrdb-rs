@@ -50,19 +50,30 @@ fn main() {
     build
         .files([
             "nostrdb/src/nostrdb.c",
-            "nostrdb/src/sha256.c",
             "nostrdb/src/bolt11/bolt11.c",
             "nostrdb/src/bolt11/amount.c",
             "nostrdb/src/bolt11/bech32.c",
             "nostrdb/src/bolt11/hash_u5.c",
-            "nostrdb/src/bolt11/list.c",
-            "nostrdb/src/bolt11/take.c",
-            "nostrdb/src/bolt11/tal.c",
-            "nostrdb/src/bolt11/talstr.c",
-            "nostrdb/src/bolt11/utf8.c",
             "nostrdb/src/invoice.c",
             "nostrdb/src/nostr_bech32.c",
             "nostrdb/src/content_parser.c",
+            "nostrdb/ccan/ccan/crypto/sha256/sha256.c",
+            //"nostrdb/ccan/ccan/htable/htable.c",
+            //"nostrdb/ccan/ccan/htable/tools/density.c",
+            //"nostrdb/ccan/ccan/htable/tools/hsearchspeed.c",
+            //"nostrdb/ccan/ccan/htable/tools/speed.c",
+            //"nostrdb/ccan/ccan/htable/tools/stringspeed.c",
+            "nostrdb/ccan/ccan/likely/likely.c",
+            "nostrdb/ccan/ccan/list/list.c",
+            "nostrdb/ccan/ccan/mem/mem.c",
+            "nostrdb/ccan/ccan/str/debug.c",
+            "nostrdb/ccan/ccan/str/str.c",
+            "nostrdb/ccan/ccan/take/take.c",
+            //"nostrdb/ccan/ccan/tal/benchmark/samba-allocs.c",
+            //"nostrdb/ccan/ccan/tal/benchmark/speed.c",
+            "nostrdb/ccan/ccan/tal/str/str.c",
+            "nostrdb/ccan/ccan/tal/tal.c",
+            "nostrdb/ccan/ccan/utf8/utf8.c",
             "nostrdb/src/block.c",
             "nostrdb/deps/flatcc/src/runtime/json_parser.c",
             "nostrdb/deps/flatcc/src/runtime/verifier.c",
@@ -75,6 +86,8 @@ fn main() {
         .include("nostrdb/deps/lmdb")
         .include("nostrdb/deps/flatcc/include")
         .include("nostrdb/deps/secp256k1/include")
+        .include("nostrdb/ccan")
+        .include("nostrdb/src")
         // Add other include paths
         //.flag("-Wall")
         .flag("-Wno-sign-compare")
@@ -94,12 +107,7 @@ fn main() {
     secp256k1_build();
 
     // Re-run the build script if any of the C files or headers change
-    for file in &[
-        "nostrdb/src/nostrdb.c",
-        "nostrdb/src/sha256.c",
-        "nostrdb/src/nostrdb.h",
-        "nostrdb/src/sha256.h",
-    ] {
+    for file in &["nostrdb/src/nostrdb.c", "nostrdb/src/nostrdb.h"] {
         println!("cargo:rerun-if-changed={}", file);
     }
 
@@ -124,6 +132,8 @@ fn main() {
     {
         let bindings = bindgen::Builder::default()
             .header("nostrdb/src/nostrdb.h")
+            .clang_arg("-Inostrdb/ccan")
+            .clang_arg("-Inostrdb/src")
             .generate()
             .expect("Unable to generate bindings");
 

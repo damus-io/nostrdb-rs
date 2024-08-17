@@ -3294,9 +3294,50 @@ fn bindgen_test_layout_ndb_iterator() {
     );
 }
 #[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_filter_string {
+    pub string: *const ::std::os::raw::c_char,
+    pub len: ::std::os::raw::c_int,
+}
+#[test]
+fn bindgen_test_layout_ndb_filter_string() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_filter_string> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_filter_string>(),
+        16usize,
+        concat!("Size of: ", stringify!(ndb_filter_string))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_filter_string>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_filter_string))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).string) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_filter_string),
+            "::",
+            stringify!(string)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).len) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_filter_string),
+            "::",
+            stringify!(len)
+        )
+    );
+}
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub union ndb_filter_element {
-    pub string: *const ::std::os::raw::c_char,
+    pub string: ndb_filter_string,
     pub id: *const ::std::os::raw::c_uchar,
     pub integer: u64,
 }
@@ -3306,7 +3347,7 @@ fn bindgen_test_layout_ndb_filter_element() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<ndb_filter_element>(),
-        8usize,
+        16usize,
         concat!("Size of: ", stringify!(ndb_filter_element))
     );
     assert_eq!(
@@ -5074,6 +5115,15 @@ extern "C" {
     pub fn ndb_filter_add_str_element(
         arg1: *mut ndb_filter,
         str_: *const ::std::os::raw::c_char,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_filter_from_json(
+        arg1: *const ::std::os::raw::c_char,
+        len: ::std::os::raw::c_int,
+        filter: *mut ndb_filter,
+        buf: *mut ::std::os::raw::c_uchar,
+        bufsize: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
