@@ -17,6 +17,7 @@ pub struct Filter {
 impl Clone for Filter {
     fn clone(&self) -> Self {
         let mut new_filter: bindings::ndb_filter = Default::default();
+        debug!("cloning filter");
         unsafe {
             bindings::ndb_filter_clone(
                 new_filter.as_mut_ptr(),
@@ -34,6 +35,44 @@ impl bindings::ndb_filter {
 
     fn as_mut_ptr(&mut self) -> *mut bindings::ndb_filter {
         self as *mut bindings::ndb_filter
+    }
+
+    fn as_ref(&self) -> &bindings::ndb_filter {
+        self
+    }
+
+    pub fn mut_iter(&self) -> MutFilterIter<'_> {
+        MutFilterIter::new(self.as_ref())
+    }
+
+    pub fn field(&self, index: i32) -> Option<FilterField<'_>> {
+        let ptr = unsafe { bindings::ndb_filter_get_elements(self.as_ptr(), index) };
+
+        if ptr.is_null() {
+            return None;
+        }
+
+        Some(FilterElements::new(self, ptr).field())
+    }
+
+    pub fn field_mut(&self, index: i32) -> Option<MutFilterField<'_>> {
+        let ptr = unsafe { bindings::ndb_filter_get_elements(self.as_ptr(), index) };
+
+        if ptr.is_null() {
+            return None;
+        }
+
+        FilterElements::new(self, ptr).field_mut()
+    }
+
+    pub fn elements(&self, index: i32) -> Option<FilterElements<'_>> {
+        let ptr = unsafe { bindings::ndb_filter_get_elements(self.as_ptr(), index) };
+
+        if ptr.is_null() {
+            return None;
+        }
+
+        Some(FilterElements::new(self, ptr))
     }
 }
 
@@ -73,6 +112,45 @@ impl Filter {
         }
     }
 
+    pub fn copy_from<'a, I>(filter: I) -> FilterBuilder
+    where
+        I: IntoIterator<Item = FilterField<'a>>,
+    {
+        let mut builder = Filter::new();
+        for field in filter {
+            match field {
+                FilterField::Ids(ids) => {
+                    builder = builder.ids(ids);
+                }
+                FilterField::Authors(authors) => builder = builder.authors(authors),
+                FilterField::Kinds(kinds) => builder = builder.kinds(kinds),
+                FilterField::Tags(chr, tags) => {
+                    builder.start_tags_field(chr).unwrap();
+                    for field in tags {
+                        match field {
+                            FilterElement::Id(id) => builder.add_id_element(id).unwrap(),
+                            FilterElement::Str(str_) => builder.add_str_element(str_).unwrap(),
+                            FilterElement::Int(int) => builder.add_int_element(int).unwrap(),
+                        }
+                    }
+                    builder.end_field();
+                }
+                FilterField::Since(n) => builder = builder.since(n),
+                FilterField::Until(n) => builder = builder.until(n),
+                FilterField::Limit(n) => builder = builder.limit(n),
+            }
+        }
+        builder
+    }
+
+    pub fn to_ref(&self) -> &bindings::ndb_filter {
+        &self.data
+    }
+
+    pub fn mut_iter(&self) -> MutFilterIter<'_> {
+        self.data.mut_iter()
+    }
+
     pub fn matches(&self, note: &Note) -> bool {
         unsafe {
             bindings::ndb_filter_matches(self.as_ptr() as *mut bindings::ndb_filter, note.as_ptr())
@@ -80,28 +158,19 @@ impl Filter {
         }
     }
 
-    pub fn field(&self, index: i32) -> Option<FilterField<'_>> {
-        let ptr = unsafe { bindings::ndb_filter_get_elements(self.as_ptr(), index) };
-
-        if ptr.is_null() {
-            return None;
-        }
-
-        Some(FilterElements::new(self, ptr).field())
-    }
-
-    pub fn elements(&self, index: i32) -> Option<FilterElements<'_>> {
-        let ptr = unsafe { bindings::ndb_filter_get_elements(self.as_ptr(), index) };
-
-        if ptr.is_null() {
-            return None;
-        }
-
-        Some(FilterElements::new(self, ptr))
-    }
-
     pub fn num_elements(&self) -> i32 {
         unsafe { &*(self.as_ptr()) }.num_elements
+    }
+
+    pub fn since(self, since: u64) -> Self {
+        for field in self.mut_iter() {
+            if let MutFilterField::Since(val) = field {
+                *val = since;
+                return self;
+            }
+        }
+
+        Filter::copy_from(&self).since(since).build()
     }
 
     pub fn as_ptr(&self) -> *const bindings::ndb_filter {
@@ -149,6 +218,14 @@ impl FilterBuilder {
         Self {
             data: Default::default(),
         }
+    }
+
+    pub fn to_ref(&self) -> &bindings::ndb_filter {
+        &self.data
+    }
+
+    pub fn mut_iter(&self) -> MutFilterIter<'_> {
+        self.data.mut_iter()
     }
 
     pub fn as_ptr(&self) -> *const bindings::ndb_filter {
@@ -257,101 +334,137 @@ impl FilterBuilder {
         };
     }
 
-    pub fn events(mut self, events: Vec<[u8; 32]>) -> Result<Self> {
-        self.start_tag_field('e')?;
-        for ref id in events {
-            self.add_id_element(id)?;
+    pub fn events<'a, I>(mut self, events: I) -> Self
+    where
+        I: IntoIterator<Item = &'a [u8; 32]>,
+    {
+        self.start_tag_field('e').unwrap();
+        for id in events {
+            self.add_id_element(id).unwrap();
         }
         self.end_field();
-        Ok(self)
+        self
     }
 
-    pub fn event(mut self, id: &[u8; 32]) -> Result<Self> {
-        self.start_tag_field('e')?;
-        self.add_id_element(id)?;
+    pub fn event(mut self, id: &[u8; 32]) -> Self {
+        self.start_tag_field('e').unwrap();
+        self.add_id_element(id).unwrap();
         self.end_field();
-        Ok(self)
+        self
     }
 
-    pub fn ids<'a, I>(mut self, ids: I) -> Result<Self>
+    pub fn ids<'a, I>(mut self, ids: I) -> Self
     where
-        I: Iterator<Item = &'a [u8; 32]>,
+        I: IntoIterator<Item = &'a [u8; 32]>,
     {
-        self.start_ids_field()?;
+        self.start_ids_field().unwrap();
         for id in ids {
-            self.add_id_element(id)?;
+            self.add_id_element(id).unwrap();
         }
         self.end_field();
-        Ok(self)
+        self
     }
 
-    pub fn pubkeys(mut self, pubkeys: Vec<[u8; 32]>) -> Result<Self> {
-        self.start_tag_field('p')?;
-        for ref pk in pubkeys {
-            self.add_id_element(pk)?;
-        }
-        self.end_field();
-        Ok(self)
-    }
-
-    pub fn authors<'a, I>(mut self, authors: I) -> Result<Self>
+    pub fn pubkeys<'a, I>(mut self, pubkeys: I) -> Self
     where
-        I: Iterator<Item = &'a [u8; 32]>,
+        I: IntoIterator<Item = &'a [u8; 32]>,
     {
-        self.start_authors_field()?;
+        self.start_tag_field('p').unwrap();
+        for pk in pubkeys {
+            self.add_id_element(pk).unwrap();
+        }
+        self.end_field();
+        self
+    }
+
+    pub fn authors<'a, I>(mut self, authors: I) -> Self
+    where
+        I: IntoIterator<Item = &'a [u8; 32]>,
+    {
+        self.start_authors_field().unwrap();
         for author in authors {
-            self.add_id_element(author)?;
+            self.add_id_element(author).unwrap();
         }
         self.end_field();
-        Ok(self)
+        self
     }
 
-    pub fn kinds(mut self, kinds: Vec<u64>) -> Result<Self> {
-        self.start_kinds_field()?;
+    pub fn kinds<I>(mut self, kinds: I) -> Self
+    where
+        I: IntoIterator<Item = u64>,
+    {
+        self.start_kinds_field().unwrap();
         for kind in kinds {
-            self.add_int_element(kind)?;
+            self.add_int_element(kind).unwrap();
         }
         self.end_field();
-        Ok(self)
+        self
     }
 
-    pub fn pubkey(mut self, pubkeys: Vec<[u8; 32]>) -> Result<Self> {
-        self.start_pubkeys_field()?;
-        for ref pubkey in pubkeys {
-            self.add_id_element(pubkey)?;
+    pub fn pubkey<'a, I>(mut self, pubkeys: I) -> Self
+    where
+        I: IntoIterator<Item = &'a [u8; 32]>,
+    {
+        self.start_pubkeys_field().unwrap();
+        for pubkey in pubkeys {
+            self.add_id_element(pubkey).unwrap();
         }
         self.end_field();
-        Ok(self)
+        self
     }
 
-    pub fn tags(mut self, tags: Vec<String>, tag: char) -> Result<Self> {
-        self.start_tag_field(tag)?;
+    pub fn tags<I>(mut self, tags: I, tag: char) -> Self
+    where
+        I: IntoIterator<Item = String>,
+    {
+        self.start_tag_field(tag).unwrap();
         for tag in tags {
-            self.add_str_element(&tag)?;
+            self.add_str_element(&tag).unwrap();
         }
         self.end_field();
-        Ok(self)
+        self
     }
 
-    pub fn since(mut self, since: u64) -> Result<Self> {
-        self.start_since_field()?;
-        self.add_int_element(since)?;
+    pub fn since(mut self, since: u64) -> Self {
+        for field in self.mut_iter() {
+            if let MutFilterField::Since(val) = field {
+                *val = since;
+                return self;
+            }
+        }
+
+        self.start_since_field().unwrap();
+        self.add_int_element(since).unwrap();
         self.end_field();
-        Ok(self)
+        self
     }
 
-    pub fn until(mut self, until: u64) -> Result<Self> {
-        self.start_until_field()?;
-        self.add_int_element(until)?;
+    pub fn until(mut self, until: u64) -> Self {
+        for field in self.mut_iter() {
+            if let MutFilterField::Until(val) = field {
+                *val = until;
+                return self;
+            }
+        }
+
+        self.start_until_field().unwrap();
+        self.add_int_element(until).unwrap();
         self.end_field();
-        Ok(self)
+        self
     }
 
-    pub fn limit(mut self, limit: u64) -> Result<Self> {
-        self.start_limit_field()?;
-        self.add_int_element(limit)?;
+    pub fn limit(mut self, limit: u64) -> Self {
+        for field in self.mut_iter() {
+            if let MutFilterField::Limit(val) = field {
+                *val = limit;
+                return self;
+            }
+        }
+
+        self.start_limit_field().unwrap();
+        self.add_int_element(limit).unwrap();
         self.end_field();
-        Ok(self)
+        self
     }
 
     pub fn build(&mut self) -> Filter {
@@ -370,28 +483,45 @@ impl Drop for Filter {
 }
 
 #[derive(Debug, Copy, Clone)]
+pub struct MutFilterIter<'a> {
+    filter: &'a bindings::ndb_filter,
+    index: i32,
+}
+
+impl<'a> MutFilterIter<'a> {
+    pub(crate) fn new(filter: &'a bindings::ndb_filter) -> Self {
+        let index = 0;
+        MutFilterIter { filter, index }
+    }
+
+    pub fn done(&self) -> bool {
+        self.index >= self.filter.num_elements
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 pub struct FilterIter<'a> {
-    filter: &'a Filter,
+    filter: &'a bindings::ndb_filter,
     index: i32,
 }
 
 /// Filter element: `authors`, `limit`, etc
 #[derive(Copy, Clone, Debug)]
 pub struct FilterElements<'a> {
-    filter: &'a Filter,
-    elements: *const bindings::ndb_filter_elements,
+    filter: &'a bindings::ndb_filter,
+    elements: *mut bindings::ndb_filter_elements,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct FilterIdElements<'a> {
-    filter: &'a Filter,
-    elements: *const bindings::ndb_filter_elements,
+    filter: &'a bindings::ndb_filter,
+    elements: *mut bindings::ndb_filter_elements,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct FilterIntElements<'a> {
-    _filter: &'a Filter,
-    elements: *const bindings::ndb_filter_elements,
+    _filter: &'a bindings::ndb_filter,
+    elements: *mut bindings::ndb_filter_elements,
 }
 
 pub struct FilterIdElemIter<'a> {
@@ -427,7 +557,10 @@ impl<'a> FilterIntElemIter<'a> {
 }
 
 impl<'a> FilterIdElements<'a> {
-    pub(crate) fn new(filter: &'a Filter, elements: *const bindings::ndb_filter_elements) -> Self {
+    pub(crate) fn new(
+        filter: &'a bindings::ndb_filter,
+        elements: *mut bindings::ndb_filter_elements,
+    ) -> Self {
         Self { filter, elements }
     }
 
@@ -458,7 +591,10 @@ impl<'a> FilterIdElements<'a> {
 }
 
 impl<'a> FilterIntElements<'a> {
-    pub(crate) fn new(filter: &'a Filter, elements: *const bindings::ndb_filter_elements) -> Self {
+    pub(crate) fn new(
+        filter: &'a bindings::ndb_filter,
+        elements: *mut bindings::ndb_filter_elements,
+    ) -> Self {
         Self {
             _filter: filter,
             elements,
@@ -492,6 +628,12 @@ pub enum FilterField<'a> {
     Since(u64),
     Until(u64),
     Limit(u64),
+}
+
+pub enum MutFilterField<'a> {
+    Since(&'a mut u64),
+    Until(&'a mut u64),
+    Limit(&'a mut u64),
 }
 
 impl<'a> FilterField<'a> {
@@ -536,15 +678,18 @@ impl<'a> FilterField<'a> {
 }
 
 impl<'a> FilterElements<'a> {
-    pub(crate) fn new(filter: &'a Filter, elements: *const bindings::ndb_filter_elements) -> Self {
+    pub(crate) fn new(
+        filter: &'a bindings::ndb_filter,
+        elements: *mut bindings::ndb_filter_elements,
+    ) -> Self {
         FilterElements { filter, elements }
     }
 
-    pub fn filter(self) -> &'a Filter {
+    pub fn filter(self) -> &'a bindings::ndb_filter {
         self.filter
     }
 
-    pub fn as_ptr(self) -> *const bindings::ndb_filter_elements {
+    pub fn as_ptr(self) -> *mut bindings::ndb_filter_elements {
         self.elements
     }
 
@@ -554,6 +699,29 @@ impl<'a> FilterElements<'a> {
 
     pub fn field(self) -> FilterField<'a> {
         FilterField::new(self)
+    }
+
+    /// Mutably access since, until, limit. We can probably do others in
+    /// the future, but this is the most useful at the moment
+    pub fn field_mut(self) -> Option<MutFilterField<'a>> {
+        if self.count() != 1 {
+            return None;
+        }
+
+        if self.elemtype() != FieldElemType::Int {
+            return None;
+        }
+
+        match self.fieldtype() {
+            FilterFieldType::Since => Some(MutFilterField::Since(self.get_mut_int(0))),
+            FilterFieldType::Until => Some(MutFilterField::Until(self.get_mut_int(0))),
+            FilterFieldType::Limit => Some(MutFilterField::Limit(self.get_mut_int(0))),
+            _ => None,
+        }
+    }
+
+    pub fn get_mut_int(&self, index: i32) -> &'a mut u64 {
+        unsafe { &mut *bindings::ndb_filter_get_int_element_ptr(self.elements, index) }
     }
 
     pub fn get(self, index: i32) -> Option<FilterElement<'a>> {
@@ -617,13 +785,13 @@ impl<'a> FilterElements<'a> {
 }
 
 impl<'a> FilterIter<'a> {
-    pub fn new(filter: &'a Filter) -> Self {
+    pub fn new(filter: &'a bindings::ndb_filter) -> Self {
         let index = 0;
         FilterIter { filter, index }
     }
 
     pub fn done(&self) -> bool {
-        self.index >= self.filter.num_elements()
+        self.index >= self.filter.num_elements
     }
 }
 
@@ -688,7 +856,16 @@ impl<'a> IntoIterator for &'a Filter {
     type IntoIter = FilterIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        FilterIter::new(self)
+        FilterIter::new(self.to_ref())
+    }
+}
+
+impl<'a> IntoIterator for &'a FilterBuilder {
+    type Item = FilterField<'a>;
+    type IntoIter = FilterIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        FilterIter::new(self.to_ref())
     }
 }
 
@@ -711,6 +888,27 @@ impl<'a> Iterator for FilterIter<'a> {
         self.index += 1;
 
         self.filter.field(ind)
+    }
+}
+
+impl<'a> Iterator for MutFilterIter<'a> {
+    type Item = MutFilterField<'a>;
+
+    fn next(&mut self) -> Option<MutFilterField<'a>> {
+        if self.done() {
+            return None;
+        }
+
+        while !self.done() {
+            let mnext = self.filter.field_mut(self.index);
+            self.index += 1;
+
+            if mnext.is_some() {
+                return mnext;
+            }
+        }
+
+        None
     }
 }
 
@@ -815,6 +1013,56 @@ mod tests {
     }
 
     #[test]
+    fn filter_quick_since_mut_works() {
+        let id: [u8; 32] = [
+            0xfb, 0x16, 0x5b, 0xe2, 0x2c, 0x7b, 0x25, 0x18, 0xb7, 0x49, 0xaa, 0xbb, 0x71, 0x40,
+            0xc7, 0x3f, 0x08, 0x87, 0xfe, 0x84, 0x47, 0x5c, 0x82, 0x78, 0x57, 0x00, 0x66, 0x3b,
+            0xe8, 0x5b, 0xa8, 0x59,
+        ];
+
+        let mut hit = 0;
+        let mut filter = Filter::new().ids([&id, &id, &id]).build();
+
+        // mutate
+        filter = filter.since(3);
+
+        for element in &filter {
+            if let FilterField::Since(s) = element {
+                hit += 1;
+                assert_eq!(s, 3);
+            }
+        }
+        assert!(hit == 1);
+    }
+
+    #[test]
+    fn filter_since_mut_works() {
+        let id: [u8; 32] = [
+            0xfb, 0x16, 0x5b, 0xe2, 0x2c, 0x7b, 0x25, 0x18, 0xb7, 0x49, 0xaa, 0xbb, 0x71, 0x40,
+            0xc7, 0x3f, 0x08, 0x87, 0xfe, 0x84, 0x47, 0x5c, 0x82, 0x78, 0x57, 0x00, 0x66, 0x3b,
+            0xe8, 0x5b, 0xa8, 0x59,
+        ];
+
+        let mut hit = 0;
+        let filter = Filter::new().ids([&id, &id, &id]).since(1);
+
+        for element in filter.mut_iter() {
+            if let MutFilterField::Since(since_ref) = element {
+                hit += 1;
+                assert_eq!(*since_ref, 1);
+                *since_ref = 2;
+            }
+        }
+        for element in &filter {
+            if let FilterField::Since(s) = element {
+                hit += 1;
+                assert_eq!(s, 2);
+            }
+        }
+        assert!(hit == 2);
+    }
+
+    #[test]
     fn filter_id_iter_works() {
         let id: [u8; 32] = [
             0xfb, 0x16, 0x5b, 0xe2, 0x2c, 0x7b, 0x25, 0x18, 0xb7, 0x49, 0xaa, 0xbb, 0x71, 0x40,
@@ -822,7 +1070,7 @@ mod tests {
             0xe8, 0x5b, 0xa8, 0x59,
         ];
 
-        let filter = Filter::new().ids(vec![id, id, id]).build();
+        let filter = Filter::new().ids([&id, &id, &id]).build();
         let mut hit = 0;
         for element in &filter {
             if let FilterField::Ids(ids) = element {

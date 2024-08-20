@@ -379,7 +379,7 @@ mod test {
 
         {
             let ndb = Ndb::new(db, &Config::new()).expect("ndb");
-            let filter = Filter::new().kinds(vec![1]).build();
+            let filter = Filter::new().kinds([1]).build();
             let root_id: [u8; 32] =
                 hex::decode("7d33c272a74e75c7328b891ab69420dd820cc7544fc65cd29a058c3495fd27d4")
                     .unwrap()
@@ -442,7 +442,7 @@ mod test {
 
         {
             let ndb = Ndb::new(db, &Config::new()).expect("ndb");
-            let filter = Filter::new().kinds(vec![1]).build();
+            let filter = Filter::new().kinds([1]).build();
             let root_id: [u8; 32] =
                 hex::decode("27e71cf53299dafb5dc7bcc0a078357418a4375cb1097bf5184662493f79a627")
                     .unwrap()
