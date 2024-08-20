@@ -143,6 +143,32 @@ impl Filter {
         builder
     }
 
+    pub fn from_json(json: &str) -> Result<Self> {
+        Self::from_json_with_bufsize(json, 1024usize * 1024usize)
+    }
+
+    pub fn from_json_with_bufsize(json: &str, bufsize: usize) -> Result<Self> {
+        let mut buf = Vec::with_capacity(bufsize);
+        let mut filter = Filter::new();
+        unsafe {
+            let json_cstr = CString::new(json).expect("string to cstring conversion failed");
+            let size = bindings::ndb_filter_from_json(
+                json_cstr.as_ptr(),
+                json.len() as i32,
+                filter.as_mut_ptr(),
+                buf.as_mut_ptr() as *mut u8,
+                bufsize as ::std::os::raw::c_int,
+            ) as usize;
+
+            // Step 4: Check the return value for success
+            if size == 0 {
+                return Err(Error::BufferOverflow); // Handle the error appropriately
+            }
+
+            Ok(Filter { data: filter.data })
+        }
+    }
+
     pub fn to_ref(&self) -> &bindings::ndb_filter {
         &self.data
     }
@@ -160,6 +186,28 @@ impl Filter {
 
     pub fn num_elements(&self) -> i32 {
         unsafe { &*(self.as_ptr()) }.num_elements
+    }
+
+    pub fn limit(self, limit: u64) -> Self {
+        for field in self.mut_iter() {
+            if let MutFilterField::Limit(val) = field {
+                *val = limit;
+                return self;
+            }
+        }
+
+        Filter::copy_from(&self).limit(limit).build()
+    }
+
+    pub fn until(self, until: u64) -> Self {
+        for field in self.mut_iter() {
+            if let MutFilterField::Until(val) = field {
+                *val = until;
+                return self;
+            }
+        }
+
+        Filter::copy_from(&self).until(until).build()
     }
 
     pub fn since(self, since: u64) -> Self {
