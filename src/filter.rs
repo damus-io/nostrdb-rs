@@ -188,7 +188,7 @@ impl Filter {
         unsafe { &*(self.as_ptr()) }.num_elements
     }
 
-    pub fn limit(self, limit: u64) -> Self {
+    pub fn limit_mut(self, limit: u64) -> Self {
         for field in self.mut_iter() {
             if let MutFilterField::Limit(val) = field {
                 *val = limit;
@@ -199,7 +199,7 @@ impl Filter {
         Filter::copy_from(&self).limit(limit).build()
     }
 
-    pub fn until(self, until: u64) -> Self {
+    pub fn until_mut(self, until: u64) -> Self {
         for field in self.mut_iter() {
             if let MutFilterField::Until(val) = field {
                 *val = until;
@@ -210,7 +210,37 @@ impl Filter {
         Filter::copy_from(&self).until(until).build()
     }
 
-    pub fn since(self, since: u64) -> Self {
+    pub fn since(&self) -> Option<u64> {
+        for field in self {
+            if let FilterField::Since(since) = field {
+                return Some(since);
+            }
+        }
+
+        None
+    }
+
+    pub fn limit(&self) -> Option<u64> {
+        for field in self {
+            if let FilterField::Limit(limit) = field {
+                return Some(limit);
+            }
+        }
+
+        None
+    }
+
+    pub fn until(&self) -> Option<u64> {
+        for field in self {
+            if let FilterField::Until(until) = field {
+                return Some(until);
+            }
+        }
+
+        None
+    }
+
+    pub fn since_mut(self, since: u64) -> Self {
         for field in self.mut_iter() {
             if let MutFilterField::Since(val) = field {
                 *val = since;
