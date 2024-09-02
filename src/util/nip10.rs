@@ -278,8 +278,8 @@ mod test {
                     .unwrap()
                     .try_into()
                     .unwrap();
-            let sub = ndb.subscribe(vec![filter.clone()]).expect("sub_id");
-            let waiter = ndb.wait_for_notes(sub.id, 1);
+            let sub = ndb.subscribe(&[filter.clone()]).expect("sub_id");
+            let waiter = ndb.wait_for_notes(sub, 1);
 
             ndb.process_event(r#"
             [
@@ -302,7 +302,7 @@ mod test {
             let res = waiter.await.expect("await ok");
             assert_eq!(res, vec![NoteKey::new(1)]);
             let txn = Transaction::new(&ndb).unwrap();
-            let res = ndb.query(&txn, vec![filter], 1).expect("note");
+            let res = ndb.query(&txn, &[filter], 1).expect("note");
             let note_reply = NoteReply::new(res[0].note.tags());
 
             assert_eq!(*note_reply.root.unwrap().id, root_id);
@@ -332,8 +332,8 @@ mod test {
                     .unwrap()
                     .try_into()
                     .unwrap();
-            let sub = ndb.subscribe(vec![filter.clone()]).expect("sub_id");
-            let waiter = ndb.wait_for_notes(sub.id, 1);
+            let sub = ndb.subscribe(&[filter.clone()]).expect("sub_id");
+            let waiter = ndb.wait_for_notes(sub, 1);
 
             ndb.process_event(r#"
             [
@@ -362,7 +362,7 @@ mod test {
             let res = waiter.await.expect("await ok");
             assert_eq!(res, vec![NoteKey::new(1)]);
             let txn = Transaction::new(&ndb).unwrap();
-            let res = ndb.query(&txn, vec![filter], 1).expect("note");
+            let res = ndb.query(&txn, &[filter], 1).expect("note");
             let note_reply = NoteReply::new(res[0].note.tags());
 
             assert_eq!(*note_reply.root.unwrap().id, root_id);
@@ -390,8 +390,8 @@ mod test {
                     .unwrap()
                     .try_into()
                     .unwrap();
-            let sub = ndb.subscribe(vec![filter.clone()]).expect("sub_id");
-            let waiter = ndb.wait_for_notes(sub.id, 1);
+            let sub = ndb.subscribe(&[filter.clone()]).expect("sub_id");
+            let waiter = ndb.wait_for_notes(sub, 1);
 
             ndb.process_event(r#"
             [
@@ -424,7 +424,7 @@ mod test {
             let res = waiter.await.expect("await ok");
             assert_eq!(res, vec![NoteKey::new(1)]);
             let txn = Transaction::new(&ndb).unwrap();
-            let res = ndb.query(&txn, vec![filter], 1).expect("note");
+            let res = ndb.query(&txn, &[filter], 1).expect("note");
             let note_reply = NoteReply::new(res[0].note.tags());
 
             assert_eq!(*note_reply.reply_to_root().unwrap().id, root_id);
@@ -453,8 +453,8 @@ mod test {
                     .unwrap()
                     .try_into()
                     .unwrap();
-            let sub = ndb.subscribe(vec![filter.clone()]).expect("sub_id");
-            let waiter = ndb.wait_for_notes(sub.id, 1);
+            let sub = ndb.subscribe(&[filter.clone()]).expect("sub_id");
+            let waiter = ndb.wait_for_notes(sub, 1);
 
             ndb.process_event(r#"
             [
@@ -504,7 +504,7 @@ mod test {
             let res = waiter.await.expect("await ok");
             assert_eq!(res, vec![NoteKey::new(1)]);
             let txn = Transaction::new(&ndb).unwrap();
-            let res = ndb.query(&txn, vec![filter], 1).expect("note");
+            let res = ndb.query(&txn, &[filter], 1).expect("note");
             let note = &res[0].note;
             let note_reply = NoteReply::new(note.tags());
 
@@ -535,8 +535,8 @@ mod test {
                     .unwrap()
                     .try_into()
                     .unwrap();
-            let sub = ndb.subscribe(vec![filter.clone()]).expect("sub_id");
-            let waiter = ndb.wait_for_notes(sub.id, 1);
+            let sub = ndb.subscribe(&[filter.clone()]).expect("sub_id");
+            let waiter = ndb.wait_for_notes(sub, 1);
 
             ndb.process_event(r#"
             [
@@ -561,7 +561,7 @@ mod test {
             let res = waiter.await.expect("await ok");
             assert_eq!(res, vec![NoteKey::new(1)]);
             let txn = Transaction::new(&ndb).unwrap();
-            let res = ndb.query(&txn, vec![filter], 1).expect("note");
+            let res = ndb.query(&txn, &[filter], 1).expect("note");
             let note = &res[0].note;
             let note_reply = NoteReply::new(note.tags());
 

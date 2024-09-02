@@ -188,7 +188,7 @@ mod tests {
         {
             let ndb = Ndb::new(db, &Config::new()).expect("ndb");
             let sub = ndb
-                .subscribe(vec![Filter::new()
+                .subscribe(&[Filter::new()
                     .ids([&[
                         0xc5, 0xd9, 0x8c, 0xbf, 0x4b, 0xcd, 0x81, 0x1e, 0x28, 0x66, 0x77, 0x0c,
                         0x3d, 0x38, 0x0c, 0x02, 0x84, 0xce, 0x1d, 0xaf, 0x3a, 0xe9, 0x98, 0x3d,
@@ -196,7 +196,7 @@ mod tests {
                     ]])
                     .build()])
                 .expect("sub");
-            let waiter = ndb.wait_for_notes(sub.id, 1);
+            let waiter = ndb.wait_for_notes(sub, 1);
             ndb.process_event(r#"["EVENT","s",{"id": "c5d98cbf4bcd811e2866770c3d380c0284ce1daf3ae9983d22565cb066cf2a19","pubkey": "083727b7a6051673f399102dc48c229c0ec08186ecd7e54ad0e9116d38429c4f","created_at": 1712517119,"kind": 1,"tags": [["e","b9e548b4aa30fa4ce9edf552adaf458385716704994fbaa9e0aa0042a5a5e01e"],["p","140ee9ff21da6e6671f750a0a747c5a3487ee8835159c7ca863e867a1c537b4f"],["hi","3"]],"content": "hi","sig": "1eed792e4db69c2bde2f5be33a383ef8b17c6afd1411598d0c4618fbdf4dbcb9689354276a74614511907a45eec234e0786733e8a6fbb312e6abf153f15fd437"}]"#).expect("process ok");
             let res = waiter.await.expect("await ok");
             assert_eq!(res.len(), 1);

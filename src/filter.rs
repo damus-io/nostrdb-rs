@@ -1102,7 +1102,7 @@ mod tests {
         let mut filter = Filter::new().ids([&id, &id, &id]).build();
 
         // mutate
-        filter = filter.since(3);
+        filter = filter.since_mut(3);
 
         for element in &filter {
             if let FilterField::Since(s) = element {

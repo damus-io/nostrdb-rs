@@ -1,7 +1,12 @@
-use crate::Filter;
 
-#[derive(Debug, Clone)]
-pub struct Subscription {
-    pub filters: Vec<Filter>,
-    pub id: u64,
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct Subscription(u64);
+
+impl Subscription {
+    pub fn new(id: u64) -> Self {
+        Self(id)
+    }
+    pub fn id(self) -> u64 {
+        self.0
+    }
 }
