@@ -156,7 +156,7 @@ impl Filter {
                 json_cstr.as_ptr(),
                 json.len() as i32,
                 filter.as_mut_ptr(),
-                buf.as_mut_ptr() as *mut u8,
+                buf.as_mut_ptr(),
                 bufsize as ::std::os::raw::c_int,
             ) as usize;
 
