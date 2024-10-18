@@ -14,6 +14,9 @@ pub struct Filter {
     pub data: bindings::ndb_filter,
 }
 
+unsafe impl Send for Filter {}
+unsafe impl Sync for Filter {}
+
 impl Clone for Filter {
     fn clone(&self) -> Self {
         let mut new_filter: bindings::ndb_filter = Default::default();

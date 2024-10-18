@@ -2868,6 +2868,8 @@ pub struct cursor {
     pub p: *mut ::std::os::raw::c_uchar,
     pub end: *mut ::std::os::raw::c_uchar,
 }
+unsafe impl Send for cursor {}
+unsafe impl Sync for cursor {}
 #[test]
 fn bindgen_test_layout_cursor() {
     const UNINIT: ::std::mem::MaybeUninit<cursor> = ::std::mem::MaybeUninit::uninit();
