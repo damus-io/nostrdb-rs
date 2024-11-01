@@ -279,6 +279,7 @@ pub const __MAC_14_3: u32 = 140300;
 pub const __MAC_14_4: u32 = 140400;
 pub const __MAC_14_5: u32 = 140500;
 pub const __MAC_15_0: u32 = 150000;
+pub const __MAC_15_1: u32 = 150100;
 pub const __IPHONE_2_0: u32 = 20000;
 pub const __IPHONE_2_1: u32 = 20100;
 pub const __IPHONE_2_2: u32 = 20200;
@@ -359,6 +360,7 @@ pub const __IPHONE_17_3: u32 = 170300;
 pub const __IPHONE_17_4: u32 = 170400;
 pub const __IPHONE_17_5: u32 = 170500;
 pub const __IPHONE_18_0: u32 = 180000;
+pub const __IPHONE_18_1: u32 = 180100;
 pub const __WATCHOS_1_0: u32 = 10000;
 pub const __WATCHOS_2_0: u32 = 20000;
 pub const __WATCHOS_2_1: u32 = 20100;
@@ -407,6 +409,7 @@ pub const __WATCHOS_10_3: u32 = 100300;
 pub const __WATCHOS_10_4: u32 = 100400;
 pub const __WATCHOS_10_5: u32 = 100500;
 pub const __WATCHOS_11_0: u32 = 110000;
+pub const __WATCHOS_11_1: u32 = 110100;
 pub const __TVOS_9_0: u32 = 90000;
 pub const __TVOS_9_1: u32 = 90100;
 pub const __TVOS_9_2: u32 = 90200;
@@ -456,6 +459,7 @@ pub const __TVOS_17_3: u32 = 170300;
 pub const __TVOS_17_4: u32 = 170400;
 pub const __TVOS_17_5: u32 = 170500;
 pub const __TVOS_18_0: u32 = 180000;
+pub const __TVOS_18_1: u32 = 180100;
 pub const __BRIDGEOS_2_0: u32 = 20000;
 pub const __BRIDGEOS_3_0: u32 = 30000;
 pub const __BRIDGEOS_3_1: u32 = 30100;
@@ -483,6 +487,7 @@ pub const __BRIDGEOS_8_3: u32 = 80300;
 pub const __BRIDGEOS_8_4: u32 = 80400;
 pub const __BRIDGEOS_8_5: u32 = 80500;
 pub const __BRIDGEOS_9_0: u32 = 90000;
+pub const __BRIDGEOS_9_1: u32 = 90100;
 pub const __DRIVERKIT_19_0: u32 = 190000;
 pub const __DRIVERKIT_20_0: u32 = 200000;
 pub const __DRIVERKIT_21_0: u32 = 210000;
@@ -497,10 +502,12 @@ pub const __DRIVERKIT_23_3: u32 = 230300;
 pub const __DRIVERKIT_23_4: u32 = 230400;
 pub const __DRIVERKIT_23_5: u32 = 230500;
 pub const __DRIVERKIT_24_0: u32 = 240000;
+pub const __DRIVERKIT_24_1: u32 = 240100;
 pub const __VISIONOS_1_0: u32 = 10000;
 pub const __VISIONOS_1_1: u32 = 10100;
 pub const __VISIONOS_1_2: u32 = 10200;
 pub const __VISIONOS_2_0: u32 = 20000;
+pub const __VISIONOS_2_1: u32 = 20100;
 pub const MAC_OS_X_VERSION_10_0: u32 = 1000;
 pub const MAC_OS_X_VERSION_10_1: u32 = 1010;
 pub const MAC_OS_X_VERSION_10_2: u32 = 1020;
@@ -563,8 +570,10 @@ pub const MAC_OS_VERSION_14_3: u32 = 140300;
 pub const MAC_OS_VERSION_14_4: u32 = 140400;
 pub const MAC_OS_VERSION_14_5: u32 = 140500;
 pub const MAC_OS_VERSION_15_0: u32 = 150000;
-pub const __MAC_OS_X_VERSION_MAX_ALLOWED: u32 = 150000;
+pub const MAC_OS_VERSION_15_1: u32 = 150100;
+pub const __MAC_OS_X_VERSION_MAX_ALLOWED: u32 = 150100;
 pub const __ENABLE_LEGACY_MAC_AVAILABILITY: u32 = 1;
+pub const USE_CLANG_TYPES: u32 = 0;
 pub const __PTHREAD_SIZE__: u32 = 8176;
 pub const __PTHREAD_ATTR_SIZE__: u32 = 56;
 pub const __PTHREAD_MUTEXATTR_SIZE__: u32 = 8;
@@ -576,6 +585,7 @@ pub const __PTHREAD_RWLOCK_SIZE__: u32 = 192;
 pub const __PTHREAD_RWLOCKATTR_SIZE__: u32 = 16;
 pub const __DARWIN_WCHAR_MIN: i32 = -2147483648;
 pub const _FORTIFY_SOURCE: u32 = 2;
+pub const USE_CLANG_STDDEF: u32 = 0;
 pub const __WORDSIZE: u32 = 64;
 pub const INT8_MAX: u32 = 127;
 pub const INT16_MAX: u32 = 32767;
@@ -635,6 +645,7 @@ pub const HAVE_LITTLE_ENDIAN: u32 = 1;
 pub const __bool_true_false_are_defined: u32 = 1;
 pub const true_: u32 = 1;
 pub const false_: u32 = 0;
+pub const USE_CLANG_STDARG: u32 = 0;
 pub const RENAME_SECLUDE: u32 = 1;
 pub const RENAME_SWAP: u32 = 2;
 pub const RENAME_EXCL: u32 = 4;
@@ -5761,6 +5772,17 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
+    pub fn ndb_filter_eq(arg1: *const ndb_filter, arg2: *const ndb_filter)
+        -> ::std::os::raw::c_int;
+}
+extern "C" {
+    #[doc = " is `a` a subset of `b`"]
+    pub fn ndb_filter_is_subset_of(
+        a: *const ndb_filter,
+        b: *const ndb_filter,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
     pub fn ndb_filter_from_json(
         arg1: *const ::std::os::raw::c_char,
         len: ::std::os::raw::c_int,
@@ -5866,6 +5888,13 @@ extern "C" {
 }
 extern "C" {
     pub fn ndb_num_subscriptions(arg1: *mut ndb) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_subscription_filters(
+        arg1: *mut ndb,
+        subid: u64,
+        filters: *mut ::std::os::raw::c_int,
+    ) -> *mut ndb_filter;
 }
 extern "C" {
     pub fn ndb_text_search(
