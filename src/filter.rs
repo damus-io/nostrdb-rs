@@ -14,6 +14,14 @@ pub struct Filter {
     pub data: bindings::ndb_filter,
 }
 
+impl PartialEq for Filter {
+    fn eq(&self, other: &Filter) -> bool {
+        unsafe {
+            bindings::ndb_filter_eq(self.as_ptr(), other.as_ptr()) == 1
+        }
+    }
+}
+
 impl Clone for Filter {
     fn clone(&self) -> Self {
         let mut new_filter: bindings::ndb_filter = Default::default();
@@ -109,6 +117,40 @@ impl Filter {
     pub fn new() -> FilterBuilder {
         FilterBuilder {
             data: Default::default(),
+        }
+    }
+
+    /// Given a set of filters, filter redundant ones. This is done by
+    /// finding all the filters that are subsets of every other filter. If
+    /// a filter is known to be a subset of another, it is removed.
+    pub fn optimize(filters: &[Filter]) -> Vec<Filter> {
+        let mut is_subset: Vec<bool> = vec![false; filters.len()];
+
+        for (i1, f1) in filters.iter().enumerate() {
+            for (i2, f2) in filters.iter().enumerate() {
+                // we don't want to count ourselves
+                if i1 == i2 {
+                    continue;
+                }
+
+                if f2.is_subset_of(f1) {
+                    is_subset[i2] = true;
+                }
+            }
+        }
+
+        filters
+            .iter()
+            .enumerate()
+            .filter(|(i, _f)| !is_subset[*i])
+            .map(|(_i, f)| f.clone())
+            .collect()
+    }
+
+    /// Is this filter a subset of another
+    pub fn is_subset_of(&self, b: &Filter) -> bool {
+        unsafe {
+            bindings::ndb_filter_is_subset_of(self.as_ptr(), b.as_ptr()) == 1
         }
     }
 
@@ -1077,6 +1119,29 @@ impl<'a> FilterElemIter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filter_test_subset_optimize() {
+        let id: [u8; 32] = [
+            0xfb, 0x16, 0x5b, 0xe2, 0x2c, 0x7b, 0x25, 0x18, 0xb7, 0x49, 0xaa, 0xbb, 0x71, 0x40,
+            0xc7, 0x3f, 0x08, 0x87, 0xfe, 0x84, 0x47, 0x5c, 0x82, 0x78, 0x57, 0x00, 0x66, 0x3b,
+            0xe8, 0x5b, 0xa8, 0x59,
+        ];
+        let expected = [
+            Filter::new().kinds(vec![1]).build(),
+            Filter::new().kinds(vec![2]).build(),
+        ];
+
+        let filters = [
+            Filter::new().kinds(vec![1]).build(),
+            Filter::new().kinds(vec![2]).build(),
+            Filter::new().kinds(vec![1]).authors(vec![&id]).build(),
+            Filter::new().kinds(vec![2]).authors(vec![&id]).build(),
+        ];
+
+        let output = Filter::optimize(&filters);
+        assert_eq!(output, expected);
+    }
 
     #[test]
     fn filter_limit_iter_works() {
