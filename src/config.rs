@@ -1,3 +1,5 @@
+use std::ffi::c_void;
+
 use crate::bindings;
 
 pub struct Config {
@@ -27,6 +29,17 @@ impl Config {
         }
 
         Config { config }
+    }
+
+    pub fn set_sub_cb(&mut self, callback: extern "C" fn(*mut c_void, u64)) -> &mut Self {
+        self.config.sub_cb = Some(callback);
+        self
+    }
+
+    pub fn set_sub_cb_ctx(&mut self, ctx: *mut c_void) -> &mut Self {
+        println!("SUBCB: set_sub_cb_ctx called with ctx: {:?}", ctx);
+        self.config.sub_cb_ctx = ctx;
+        self
     }
 
     //
