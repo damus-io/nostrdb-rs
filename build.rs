@@ -141,8 +141,14 @@ fn main() {
             .generate()
             .expect("Unable to generate bindings");
 
+        #[cfg(target_os = "windows")]
+        let filename = "src/bindings_win.rs";
+
+        #[cfg(not(target_os = "windows"))]
+        let filename = "src/bindings_posix.rs";
+
         bindings
-            .write_to_file("src/bindings.rs")
+            .write_to_file(filename)
             .expect("Couldn't write bindings!");
     }
 }
