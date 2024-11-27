@@ -159,7 +159,11 @@ impl Ndb {
         vec.into_iter().map(NoteKey::new).collect()
     }
 
-    pub async fn wait_for_notes(&self, sub_id: Subscription, max_notes: u32) -> Result<Vec<NoteKey>> {
+    pub async fn wait_for_notes(
+        &self,
+        sub_id: Subscription,
+        max_notes: u32,
+    ) -> Result<Vec<NoteKey>> {
         let ndb = self.clone();
         let handle = task::spawn_blocking(move || {
             let mut vec: Vec<u64> = vec![];
