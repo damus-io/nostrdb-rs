@@ -1,24 +1,47 @@
 name: Rust
 
-on:
-  push:
-    branches: [ "master", "ci" ]
-  pull_request:
-    branches: [ "master" ]
+on: [pull_request]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  fmt:
+    name: Rustfmt
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v3
-    - name: Initialize Submodules
-      run: git submodule update --init --recursive
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy -- -D warnings
+
+  linux-build-test:
+    name: Build and Test (Linux)
+    uses: ./.github/workflows/build-and-test.yml
+    with:
+      os: ubuntu-latest
+
+  macos-build-test:
+    name: Build and Test (macOS)
+    uses: ./.github/workflows/build-and-test.yml
+    with:
+      os: macos-latest
+
+  windows-build-test:
+    name: Build and Test (Windows)
+    uses: ./.github/workflows/build-and-test.yml
+    with:
+      os: windows-latest

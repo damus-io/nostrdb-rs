@@ -1,0 +1,36 @@
+name: Build & Test
+
+on:
+  workflow_call:
+    inputs:
+      os:
+        required: true
+        type: string
+      additional-setup:
+        required: false
+        type: string
+
+jobs:
+  run:
+    runs-on: ${{ inputs.os }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Additional Setup (if specified)
+        if: ${{ inputs.additional-setup != '' }}
+        run: ${{ inputs.additional-setup }}
+
+      - name: Run Tests
+        run: cargo test --release
+
+      - name: Build
+        run: cargo build --release

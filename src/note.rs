@@ -25,7 +25,7 @@ pub struct NoteBuildOptions<'a> {
     pub sign_key: Option<&'a [u8; 32]>,
 }
 
-impl<'a> Default for NoteBuildOptions<'a> {
+impl Default for NoteBuildOptions<'_> {
     fn default() -> Self {
         NoteBuildOptions {
             set_created_at: true,
@@ -46,7 +46,7 @@ impl<'a> NoteBuildOptions<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum Note<'a> {
     /// A note in-memory outside of nostrdb. This note is a pointer to a note in
     /// memory and will be free'd when [Drop]ped. Method such as [Note::from_json]
@@ -67,6 +67,51 @@ pub enum Note<'a> {
         key: NoteKey,
         transaction: &'a Transaction,
     },
+}
+
+impl Clone for Note<'_> {
+    fn clone(&self) -> Self {
+        // TODO (jb55): it is still probably better to just separate owned notes
+        // into NoteBuf... that way we know exactly what we are cloning
+        // and when. Owned notes are a bit more expensive to clone, so
+        // it would be better if API encoded that explicitly.
+        match self {
+            Note::Owned { ptr, size } => {
+                // Allocate memory for the cloned note
+                let new_ptr = unsafe { libc::malloc(*size) as *mut bindings::ndb_note };
+                if new_ptr.is_null() {
+                    panic!("Failed to allocate memory for cloned note");
+                }
+
+                // Use memcpy to copy the memory
+                unsafe {
+                    libc::memcpy(
+                        new_ptr as *mut libc::c_void,
+                        *ptr as *const libc::c_void,
+                        *size,
+                    );
+                }
+
+                // Return a new Owned Note
+                Note::Owned {
+                    ptr: new_ptr,
+                    size: *size,
+                }
+            }
+
+            Note::Transactional {
+                ptr,
+                size,
+                key,
+                transaction,
+            } => Note::Transactional {
+                ptr: *ptr,
+                size: *size,
+                key: *key,
+                transaction,
+            },
+        }
+    }
 }
 
 impl<'a> Note<'a> {
@@ -205,7 +250,7 @@ impl<'a> Note<'a> {
     }
 }
 
-impl<'a> Drop for Note<'a> {
+impl Drop for Note<'_> {
     fn drop(&mut self) {
         if let Note::Owned { ptr, .. } = self {
             unsafe { libc::free((*ptr) as *mut libc::c_void) }
@@ -264,7 +309,7 @@ pub struct NoteBuilder<'a> {
     options: NoteBuildOptions<'a>,
 }
 
-impl<'a> Default for NoteBuilder<'a> {
+impl Default for NoteBuilder<'_> {
     fn default() -> Self {
         NoteBuilder::new()
     }

@@ -16,7 +16,7 @@ pub struct NoteIdRef<'a> {
     pub marker: Option<Marker>,
 }
 
-impl<'a> NoteIdRef<'a> {
+impl NoteIdRef<'_> {
     pub fn to_owned(&self) -> NoteIdRefBuf {
         NoteIdRefBuf {
             index: self.index,

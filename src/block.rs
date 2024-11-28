@@ -221,7 +221,7 @@ impl<'a> Blocks<'a> {
     }
 }
 
-impl<'a> Drop for Blocks<'a> {
+impl Drop for Blocks<'_> {
     fn drop(&mut self) {
         unsafe { bindings::ndb_blocks_free(self.as_ptr()) };
     }
