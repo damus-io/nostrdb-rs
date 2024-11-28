@@ -1,4 +1,4 @@
-﻿// build.rs
+// build.rs
 use cc::Build;
 use std::env;
 use std::path::PathBuf;
@@ -42,7 +42,7 @@ fn secp256k1_build() {
 
 /// bolt11 deps with portability issues, exclude these on windows build
 fn bolt11_deps() -> &'static [&'static str] {
-    return &[
+    &[
         "nostrdb/ccan/ccan/likely/likely.c",
         "nostrdb/ccan/ccan/list/list.c",
         "nostrdb/ccan/ccan/mem/mem.c",
@@ -52,7 +52,6 @@ fn bolt11_deps() -> &'static [&'static str] {
         "nostrdb/ccan/ccan/tal/str/str.c",
         "nostrdb/ccan/ccan/tal/tal.c",
         "nostrdb/ccan/ccan/utf8/utf8.c",
-
         "nostrdb/src/bolt11/bolt11.c",
         "nostrdb/src/bolt11/amount.c",
         "nostrdb/src/bolt11/hash_u5.c",
@@ -86,18 +85,19 @@ fn main() {
         .include("nostrdb/deps/secp256k1/include")
         .include("nostrdb/ccan")
         .include("nostrdb/src");
-        // Add other include paths
-        //.flag("-Wall")
+    // Add other include paths
+    //.flag("-Wall")
     //.flag("-Werror")
     //.flag("-g")
 
     // Link Security framework on macOS
     if !cfg!(target_os = "windows") {
         build.files(bolt11_deps());
-        build.flag("-Wno-sign-compare")
-             .flag("-Wno-misleading-indentation")
-             .flag("-Wno-unused-function")
-             .flag("-Wno-unused-parameter");
+        build
+            .flag("-Wno-sign-compare")
+            .flag("-Wno-misleading-indentation")
+            .flag("-Wno-unused-function")
+            .flag("-Wno-unused-parameter");
     } else {
         // need this on windows
         println!("cargo:rustc-link-lib=bcrypt");

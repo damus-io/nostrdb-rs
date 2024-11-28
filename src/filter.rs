@@ -1008,7 +1008,7 @@ impl<'a> IntoIterator for FilterIntElements<'a> {
     }
 }
 
-impl<'a> Iterator for FilterIntElemIter<'a> {
+impl Iterator for FilterIntElemIter<'_> {
     type Item = u64;
 
     fn next(&mut self) -> Option<u64> {

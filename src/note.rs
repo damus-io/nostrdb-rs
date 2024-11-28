@@ -25,7 +25,7 @@ pub struct NoteBuildOptions<'a> {
     pub sign_key: Option<&'a [u8; 32]>,
 }
 
-impl<'a> Default for NoteBuildOptions<'a> {
+impl Default for NoteBuildOptions<'_> {
     fn default() -> Self {
         NoteBuildOptions {
             set_created_at: true,
@@ -69,7 +69,7 @@ pub enum Note<'a> {
     },
 }
 
-impl<'a> Clone for Note<'a> {
+impl Clone for Note<'_> {
     fn clone(&self) -> Self {
         // TODO (jb55): it is still probably better to just separate owned notes
         // into NoteBuf... that way we know exactly what we are cloning
@@ -250,7 +250,7 @@ impl<'a> Note<'a> {
     }
 }
 
-impl<'a> Drop for Note<'a> {
+impl Drop for Note<'_> {
     fn drop(&mut self) {
         if let Note::Owned { ptr, .. } = self {
             unsafe { libc::free((*ptr) as *mut libc::c_void) }
@@ -309,7 +309,7 @@ pub struct NoteBuilder<'a> {
     options: NoteBuildOptions<'a>,
 }
 
-impl<'a> Default for NoteBuilder<'a> {
+impl Default for NoteBuilder<'_> {
     fn default() -> Self {
         NoteBuilder::new()
     }
