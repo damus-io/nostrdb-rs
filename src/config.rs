@@ -30,12 +30,12 @@ impl Config {
     }
 
     //
-    pub fn set_flags(&mut self, flags: i32) -> &mut Self {
+    pub fn set_flags(mut self, flags: i32) -> Self {
         self.config.flags = flags;
         self
     }
 
-    pub fn skip_validation(&mut self, skip: bool) -> &mut Self {
+    pub fn skip_validation(mut self, skip: bool) -> Self {
         let skip_note_verify: i32 = 1 << 1;
 
         if skip {
@@ -47,12 +47,12 @@ impl Config {
         self
     }
 
-    pub fn set_mapsize(&mut self, bytes: usize) -> &mut Self {
+    pub fn set_mapsize(mut self, bytes: usize) -> Self {
         self.config.mapsize = bytes;
         self
     }
 
-    pub fn set_ingester_threads(&mut self, threads: i32) -> &mut Self {
+    pub fn set_ingester_threads(mut self, threads: i32) -> Self {
         self.config.ingester_threads = threads;
         self
     }
