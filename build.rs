@@ -3,18 +3,17 @@ use cc::Build;
 use std::env;
 use std::path::PathBuf;
 
-fn secp256k1_build() {
+fn secp256k1_build(base_config: &mut Build) {
     // Actual build
-    let mut base_config = cc::Build::new();
+    //let mut base_config = cc::Build::new();
     base_config
         .include("nostrdb/deps/secp256k1/")
         .include("nostrdb/deps/secp256k1/include")
         .include("nostrdb/deps/secp256k1/src")
         .flag_if_supported("-Wno-unused-function") // some ecmult stuff is defined but not used upstream
         .flag_if_supported("-Wno-unused-parameter") // patching out printf causes this warning
-        //.define("SECP256K1_API", Some(""))
+        .define("SECP256K1_STATIC", "1")
         .define("ENABLE_MODULE_ECDH", Some("1"))
-        .define("SECP256K1_STATIC", Some("1"))
         .define("ENABLE_MODULE_SCHNORRSIG", Some("1"))
         .define("ENABLE_MODULE_EXTRAKEYS", Some("1"));
     //.define("ENABLE_MODULE_ELLSWIFT", Some("1"))
@@ -35,9 +34,7 @@ fn secp256k1_build() {
         base_config.flag("-O1");
     }
 
-    base_config.compile("libsecp256k1.a");
-
-    println!("cargo:rustc-link-lib=static=secp256k1");
+    //base_config.compile("libsecp256k1.a");
 }
 
 /// bolt11 deps with portability issues, exclude these on windows build
@@ -79,7 +76,6 @@ fn main() {
             "nostrdb/deps/lmdb/mdb.c",
             "nostrdb/deps/lmdb/midl.c",
         ])
-        .define("SECP256K1_STATIC", Some("1"))
         .include("nostrdb/deps/lmdb")
         .include("nostrdb/deps/flatcc/include")
         .include("nostrdb/deps/secp256k1/include")
@@ -112,9 +108,10 @@ fn main() {
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     println!("cargo:rustc-link-search=native={}", out_path.display());
 
-    secp256k1_build();
+    secp256k1_build(&mut build);
 
     build.compile("libnostrdb.a");
+
     println!("cargo:rustc-link-lib=static=nostrdb");
 
     // Re-run the build script if any of the C files or headers change
