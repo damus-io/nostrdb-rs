@@ -108,19 +108,19 @@ fn main() {
         build.flag("-O1");
     }
 
-    build.compile("libnostrdb.a");
+    // Print out the path to the compiled library
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    println!("cargo:rustc-link-search=native={}", out_path.display());
 
     secp256k1_build();
+
+    build.compile("libnostrdb.a");
+    println!("cargo:rustc-link-lib=static=nostrdb");
 
     // Re-run the build script if any of the C files or headers change
     for file in &["nostrdb/src/nostrdb.c", "nostrdb/src/nostrdb.h"] {
         println!("cargo:rerun-if-changed={}", file);
     }
-
-    // Print out the path to the compiled library
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    println!("cargo:rustc-link-search=native={}", out_path.display());
-    println!("cargo:rustc-link-lib=static=nostrdb");
 
     // Link Security framework on macOS
     if cfg!(target_os = "macos") {
