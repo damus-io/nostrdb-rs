@@ -509,7 +509,7 @@ mod tests {
             let err = ndb
                 .get_note_by_id(&mut txn, &[0; 32])
                 .expect_err("not found");
-            assert!(err == Error::NotFound);
+            assert!(matches!(err, Error::NotFound));
         }
 
         test_util::cleanup_db(db);

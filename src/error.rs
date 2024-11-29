@@ -1,27 +1,46 @@
-use std::fmt;
+use thiserror::Error;
 
-#[derive(Debug, Eq, PartialEq)]
+/// Main error type
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("Database open failed")]
     DbOpenFailed,
+
+    #[error("Not found")]
     NotFound,
+
+    #[error("Decode error")]
     DecodeError,
+
+    #[error("Query failed")]
     QueryError,
+
+    #[error("Note process failed")]
     NoteProcessFailed,
+
+    #[error("Transaction failed")]
     TransactionFailed,
+
+    #[error("Subscription failed")]
     SubscriptionError,
+
+    #[error("Buffer overflow")]
     BufferOverflow,
-    Filter(FilterError),
+
+    #[error("Filter error: {0}")]
+    Filter(#[from] FilterError),
+
+    #[error("IO error: {0}")]
+    IO(#[from] std::io::Error),
 }
 
-impl Error {
-    pub fn filter(ferr: FilterError) -> Self {
-        Error::Filter(ferr)
-    }
-}
-
-#[derive(Debug, Eq, PartialEq)]
+/// Filter-specific error type
+#[derive(Debug, Error, Eq, PartialEq)]
 pub enum FilterError {
+    #[error("Field already exists")]
     FieldAlreadyExists,
+
+    #[error("Field already started")]
     FieldAlreadyStarted,
 }
 
@@ -34,30 +53,3 @@ impl FilterError {
         Error::Filter(FilterError::FieldAlreadyStarted)
     }
 }
-
-impl fmt::Display for FilterError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FilterError::FieldAlreadyExists => write!(f, "field already exists"),
-            FilterError::FieldAlreadyStarted => write!(f, "field already started"),
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::DbOpenFailed => write!(f, "Open failed"),
-            Error::NotFound => write!(f, "Not found"),
-            Error::QueryError => write!(f, "Query failed"),
-            Error::DecodeError => write!(f, "Decode error"),
-            Error::NoteProcessFailed => write!(f, "Note process failed"),
-            Error::TransactionFailed => write!(f, "Transaction failed"),
-            Error::SubscriptionError => write!(f, "Subscription failed"),
-            Error::BufferOverflow => write!(f, "Buffer overflow"),
-            Error::Filter(filter_err) => write!(f, "Filter: {filter_err}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}

@@ -401,7 +401,7 @@ impl FilterBuilder {
         let r =
             unsafe { bindings::ndb_filter_start_tag_field(self.as_mut_ptr(), tag as u8 as c_char) };
         if r == 0 {
-            return Err(Error::filter(FilterError::FieldAlreadyStarted));
+            return Err(FilterError::FieldAlreadyStarted.into());
         }
         Ok(())
     }

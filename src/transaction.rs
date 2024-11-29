@@ -69,7 +69,7 @@ mod tests {
             {
                 let _txn = Transaction::new(&ndb).expect("txn1 failed");
                 let txn2 = Transaction::new(&ndb).expect_err("tx2");
-                assert!(txn2 == Error::TransactionFailed);
+                assert!(matches!(txn2, Error::TransactionFailed));
             }
 
             {
