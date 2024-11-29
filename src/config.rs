@@ -1,5 +1,6 @@
 use crate::bindings;
 
+#[derive(Copy, Clone)]
 pub struct Config {
     pub config: bindings::ndb_config,
 }

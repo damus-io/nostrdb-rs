@@ -10,6 +10,7 @@ use std::os::raw::c_int;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::task; // Make sure to import the task module
+use tracing::debug;
 
 #[derive(Debug)]
 struct NdbRef {
@@ -51,7 +52,28 @@ impl Ndb {
             let _ = fs::create_dir_all(path);
         }
 
-        let result = unsafe { bindings::ndb_init(&mut ndb, db_dir_cstr.as_ptr(), config.as_ptr()) };
+        let min_mapsize = 1024 * 1024 * 512;
+        let mut mapsize = config.config.mapsize;
+        let mut config = *config;
+
+        let result = loop {
+            let result =
+                unsafe { bindings::ndb_init(&mut ndb, db_dir_cstr.as_ptr(), config.as_ptr()) };
+
+            if result == 0 {
+                mapsize /= 2;
+                config = config.set_mapsize(mapsize);
+                debug!("ndb init failed, reducing mapsize to {}", mapsize);
+
+                if mapsize > min_mapsize {
+                    continue;
+                } else {
+                    break 0;
+                }
+            } else {
+                break result;
+            }
+        };
 
         if result == 0 {
             return Err(Error::DbOpenFailed);
@@ -447,5 +469,44 @@ mod tests {
             let note = ndb.get_note_by_id(&mut txn, &id_bytes).expect("note");
             assert_eq!(note.kind(), 1);
         }
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_windows_large_mapsize() {
+        use std::{fs, path::Path};
+
+        let db = "target/testdbs/windows_large_mapsize";
+        test_util::cleanup_db(&db);
+
+        {
+            // 32 TiB should be way too big for CI
+            let config =
+                Config::new().set_mapsize(1024usize * 1024usize * 1024usize * 1024usize * 32usize);
+
+            // in this case, nostrdb should try to keep resizing to
+            // smaller mapsizes until success
+
+            let ndb = Ndb::new(db, &config);
+
+            assert!(ndb.is_ok());
+        }
+
+        let file_len = fs::metadata(Path::new(db).join("data.mdb"))
+            .expect("metadata")
+            .len();
+
+        assert!(file_len > 0);
+
+        if cfg!(target_os = "windows") {
+            // on windows the default mapsize will be 1MB when we fail
+            // to open it
+            assert_ne!(file_len, 1048576);
+        } else {
+            assert!(file_len < 1024u64 * 1024u64);
+        }
+
+        // we should definitely clean this up... especially on windows
+        test_util::cleanup_db(&db);
     }
 }
