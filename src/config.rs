@@ -3,6 +3,8 @@ use crate::bindings;
 #[derive(Copy, Clone)]
 pub struct Config {
     pub config: bindings::ndb_config,
+    // We add a flag to know if we've installed a Rust closure so we can clean it up in Drop.
+    is_rust_closure: bool,
 }
 
 impl Default for Config {
@@ -27,7 +29,11 @@ impl Config {
             bindings::ndb_default_config(&mut config);
         }
 
-        Config { config }
+        let is_rust_closure = false;
+        Config {
+            config,
+            is_rust_closure,
+        }
     }
 
     //
@@ -48,6 +54,23 @@ impl Config {
         self
     }
 
+    /// Set a callback for when we have  
+    pub fn set_sub_callback<F>(mut self, closure: F) -> Self
+    where
+        F: FnMut(u64) + 'static,
+    {
+        // Box the closure to ensure it has a stable address.
+        let boxed_closure: Box<dyn FnMut(u64)> = Box::new(closure);
+
+        // Convert it to a raw pointer to store in sub_cb_ctx.
+        let ctx_ptr = Box::into_raw(Box::new(boxed_closure)) as *mut ::std::os::raw::c_void;
+
+        self.config.sub_cb = Some(sub_callback_trampoline);
+        self.config.sub_cb_ctx = ctx_ptr;
+        self.is_rust_closure = true;
+        self
+    }
+
     pub fn set_mapsize(mut self, bytes: usize) -> Self {
         self.config.mapsize = bytes;
         self
@@ -58,10 +81,19 @@ impl Config {
         self
     }
 
-    // Add other setter methods as needed
-
     // Internal method to get a raw pointer to the config, used in Ndb
     pub fn as_ptr(&self) -> *const bindings::ndb_config {
         &self.config
+    }
+}
+
+extern "C" fn sub_callback_trampoline(ctx: *mut ::std::os::raw::c_void, subid: u64) {
+    unsafe {
+        // Convert the raw pointer back into a reference to our closure.
+        // We know this pointer was created by Box::into_raw in `set_sub_callback_rust`.
+        let closure_ptr = ctx as *mut Box<dyn FnMut(u64)>;
+        assert!(!closure_ptr.is_null());
+        let closure = &mut *closure_ptr;
+        closure(subid);
     }
 }

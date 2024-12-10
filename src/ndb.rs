@@ -15,6 +15,11 @@ use tracing::debug;
 #[derive(Debug)]
 struct NdbRef {
     ndb: *mut bindings::ndb,
+
+    /// Have we configured a rust closure for our callback? If so we need
+    /// to clean that up when this is dropped
+    has_rust_closure: bool,
+    rust_cb_ctx: *mut ::std::os::raw::c_void,
 }
 
 /// It's safe to have multi-threaded references to this because thread safety
@@ -27,6 +32,11 @@ impl Drop for NdbRef {
     fn drop(&mut self) {
         unsafe {
             bindings::ndb_destroy(self.ndb);
+
+            if self.has_rust_closure && !self.rust_cb_ctx.is_null() {
+                // Rebuild the Box from the raw pointer and drop it.
+                let _ = Box::from_raw(self.rust_cb_ctx as *mut Box<dyn FnMut()>);
+            }
         }
     }
 }
@@ -79,7 +89,14 @@ impl Ndb {
             return Err(Error::DbOpenFailed);
         }
 
-        let refs = Arc::new(NdbRef { ndb });
+        let has_rust_closure = !config.config.sub_cb_ctx.is_null();
+        let rust_cb_ctx = config.config.sub_cb_ctx;
+        let refs = Arc::new(NdbRef {
+            ndb,
+            has_rust_closure,
+            rust_cb_ctx,
+        });
+
         Ok(Ndb { refs })
     }
 
