@@ -22,9 +22,10 @@ struct NdbRef {
     rust_cb_ctx: *mut ::std::os::raw::c_void,
 }
 
-/// It's safe to have multi-threaded references to this because thread safety
-/// is guaranteed by LMDB
+/// SAFETY: thread safety is ensured by nostrdb
 unsafe impl Send for NdbRef {}
+
+/// SAFETY: thread safety is ensured by nostrdb
 unsafe impl Sync for NdbRef {}
 
 /// The database is automatically closed when [Ndb] is [Drop]ped.
