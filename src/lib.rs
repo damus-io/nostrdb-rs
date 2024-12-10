@@ -12,6 +12,9 @@ mod bindings;
 mod ndb_profile;
 
 mod block;
+
+mod future;
+
 mod config;
 mod error;
 mod filter;
@@ -30,6 +33,8 @@ pub use block::{Block, BlockType, Blocks, Mention};
 pub use config::Config;
 pub use error::{Error, FilterError};
 pub use filter::{Filter, FilterBuilder};
+pub(crate) use future::SubscriptionState;
+pub use future::SubscriptionStream;
 pub use ndb::Ndb;
 pub use ndb_profile::{NdbProfile, NdbProfileRecord};
 pub use ndb_str::{NdbStr, NdbStrVariant};
