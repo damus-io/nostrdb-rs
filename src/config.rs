@@ -3,8 +3,6 @@ use crate::bindings;
 #[derive(Copy, Clone)]
 pub struct Config {
     pub config: bindings::ndb_config,
-    // We add a flag to know if we've installed a Rust closure so we can clean it up in Drop.
-    is_rust_closure: bool,
 }
 
 impl Default for Config {
@@ -29,11 +27,7 @@ impl Config {
             bindings::ndb_default_config(&mut config);
         }
 
-        let is_rust_closure = false;
-        Config {
-            config,
-            is_rust_closure,
-        }
+        Config { config }
     }
 
     //
@@ -54,7 +48,8 @@ impl Config {
         self
     }
 
-    /// Set a callback for when we have  
+    /// Set a callback to be notified on updated subscriptions. The function
+    /// will be called with the corresponsing subscription id.
     pub fn set_sub_callback<F>(mut self, closure: F) -> Self
     where
         F: FnMut(u64) + 'static,
@@ -67,7 +62,6 @@ impl Config {
 
         self.config.sub_cb = Some(sub_callback_trampoline);
         self.config.sub_cb_ctx = ctx_ptr;
-        self.is_rust_closure = true;
         self
     }
 

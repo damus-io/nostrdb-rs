@@ -3,22 +3,20 @@ use std::ptr;
 
 use crate::{
     bindings, Blocks, Config, Error, Filter, Note, NoteKey, ProfileKey, ProfileRecord, QueryResult,
-    Result, Subscription, Transaction,
+    Result, Subscription, SubscriptionState, SubscriptionStream, Transaction,
 };
+use futures::StreamExt;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::fs;
 use std::os::raw::c_int;
 use std::path::Path;
-use std::sync::Arc;
-use tokio::task; // Make sure to import the task module
+use std::sync::{Arc, Mutex};
 use tracing::debug;
 
 #[derive(Debug)]
 struct NdbRef {
     ndb: *mut bindings::ndb,
-
-    /// Have we configured a rust closure for our callback? If so we need
-    /// to clean that up when this is dropped
-    has_rust_closure: bool,
     rust_cb_ctx: *mut ::std::os::raw::c_void,
 }
 
@@ -34,7 +32,7 @@ impl Drop for NdbRef {
         unsafe {
             bindings::ndb_destroy(self.ndb);
 
-            if self.has_rust_closure && !self.rust_cb_ctx.is_null() {
+            if !self.rust_cb_ctx.is_null() {
                 // Rebuild the Box from the raw pointer and drop it.
                 let _ = Box::from_raw(self.rust_cb_ctx as *mut Box<dyn FnMut()>);
             }
@@ -42,10 +40,15 @@ impl Drop for NdbRef {
     }
 }
 
+type SubMap = HashMap<Subscription, SubscriptionState>;
+
 /// A nostrdb context. Construct one of these with [Ndb::new].
 #[derive(Debug, Clone)]
 pub struct Ndb {
     refs: Arc<NdbRef>,
+
+    /// Track query future states
+    pub(crate) subs: Arc<Mutex<SubMap>>,
 }
 
 impl Ndb {
@@ -65,7 +68,30 @@ impl Ndb {
 
         let min_mapsize = 1024 * 1024 * 512;
         let mut mapsize = config.config.mapsize;
-        let mut config = *config;
+        let config = *config;
+
+        let prev_callback = config.config.sub_cb;
+        let prev_callback_ctx = config.config.sub_cb_ctx;
+        let subs = Arc::new(Mutex::new(SubMap::default()));
+        let subs_clone = subs.clone();
+
+        // We need to register our own callback so that we can wake
+        // query futures
+        let mut config = config.set_sub_callback(move |sub_id: u64| {
+            let mut map = subs_clone.lock().unwrap();
+            if let Some(s) = map.get_mut(&Subscription::new(sub_id)) {
+                s.ready = true;
+                if let Some(w) = s.waker.take() {
+                    w.wake();
+                }
+            }
+
+            if let Some(pcb) = prev_callback {
+                unsafe {
+                    pcb(prev_callback_ctx, sub_id);
+                };
+            }
+        });
 
         let result = loop {
             let result =
@@ -90,15 +116,10 @@ impl Ndb {
             return Err(Error::DbOpenFailed);
         }
 
-        let has_rust_closure = !config.config.sub_cb_ctx.is_null();
         let rust_cb_ctx = config.config.sub_cb_ctx;
-        let refs = Arc::new(NdbRef {
-            ndb,
-            has_rust_closure,
-            rust_cb_ctx,
-        });
+        let refs = Arc::new(NdbRef { ndb, rust_cb_ctx });
 
-        Ok(Ndb { refs })
+        Ok(Ndb { refs, subs })
     }
 
     /// Ingest a relay-sent event in the form `["EVENT","subid", {"id:"...}]`
@@ -155,8 +176,16 @@ impl Ndb {
         unsafe { bindings::ndb_num_subscriptions(self.as_ptr()) as u32 }
     }
 
-    pub fn unsubscribe(&self, sub: Subscription) -> Result<()> {
+    pub fn unsubscribe(&mut self, sub: Subscription) -> Result<()> {
         let r = unsafe { bindings::ndb_unsubscribe(self.as_ptr(), sub.id()) };
+
+        // mark the subscription as done if it exists in our stream map
+        {
+            let mut map = self.subs.lock().unwrap();
+            if let Entry::Occupied(mut entry) = map.entry(sub) {
+                entry.get_mut().done = true;
+            }
+        }
 
         if r == 0 {
             Err(Error::SubscriptionError)
@@ -204,32 +233,11 @@ impl Ndb {
         sub_id: Subscription,
         max_notes: u32,
     ) -> Result<Vec<NoteKey>> {
-        let ndb = self.clone();
-        let handle = task::spawn_blocking(move || {
-            let mut vec: Vec<u64> = vec![];
-            vec.reserve_exact(max_notes as usize);
-            let res = unsafe {
-                bindings::ndb_wait_for_notes(
-                    ndb.as_ptr(),
-                    sub_id.id(),
-                    vec.as_mut_ptr(),
-                    max_notes as c_int,
-                )
-            };
-            if res == 0 {
-                Err(Error::SubscriptionError)
-            } else {
-                unsafe {
-                    vec.set_len(res as usize);
-                };
-                Ok(vec)
-            }
-        });
+        let mut stream = SubscriptionStream::new(self.clone(), sub_id).notes_per_await(max_notes);
 
-        match handle.await {
-            Ok(Ok(res)) => Ok(res.into_iter().map(NoteKey::new).collect()),
-            Ok(Err(err)) => Err(err),
-            Err(_) => Err(Error::SubscriptionError),
+        match stream.next().await {
+            Some(res) => Ok(res),
+            None => Err(Error::SubscriptionError),
         }
     }
 
@@ -525,6 +533,42 @@ mod tests {
         }
 
         // we should definitely clean this up... especially on windows
+        test_util::cleanup_db(&db);
+    }
+
+    #[tokio::test]
+    async fn test_stream() {
+        let db = "target/testdbs/test_callback";
+        test_util::cleanup_db(&db);
+
+        {
+            let mut ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            let sub_id = {
+                let filter = Filter::new().kinds(vec![1]).build();
+                let filters = vec![filter];
+
+                let sub_id = ndb.subscribe(&filters).expect("sub_id");
+                let mut sub = sub_id.stream(&ndb).notes_per_await(1);
+
+                let res = sub.next();
+
+                ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+
+                let res = res.await.expect("await ok");
+                assert_eq!(res, vec![NoteKey::new(1)]);
+
+                // ensure that unsubscribing kills the stream
+                assert!(ndb.unsubscribe(sub_id).is_ok());
+                assert!(sub.next().await.is_none());
+
+                assert!(ndb.subs.lock().unwrap().contains_key(&sub_id));
+                sub_id
+            };
+
+            // ensure subscription state is removed after stream is dropped
+            assert!(!ndb.subs.lock().unwrap().contains_key(&sub_id));
+        }
+
         test_util::cleanup_db(&db);
     }
 }
