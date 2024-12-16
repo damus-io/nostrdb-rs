@@ -297,7 +297,7 @@ impl Ndb {
         ))
     }
 
-    pub fn get_notekey_by_id(&self, txn: &Transaction, id: &[u8; 32]) -> Result<u64> {
+    pub fn get_notekey_by_id(&self, txn: &Transaction, id: &[u8; 32]) -> Result<NoteKey> {
         let res = unsafe {
             bindings::ndb_get_notekey_by_id(
                 txn.as_mut_ptr(),
@@ -309,7 +309,26 @@ impl Ndb {
             return Err(Error::NotFound);
         }
 
-        Ok(res)
+        Ok(NoteKey::new(res))
+    }
+
+    pub fn get_profilekey_by_pubkey(
+        &self,
+        txn: &Transaction,
+        pubkey: &[u8; 32],
+    ) -> Result<ProfileKey> {
+        let res = unsafe {
+            bindings::ndb_get_profilekey_by_pubkey(
+                txn.as_mut_ptr(),
+                pubkey.as_ptr() as *const ::std::os::raw::c_uchar,
+            )
+        };
+
+        if res == 0 {
+            return Err(Error::NotFound);
+        }
+
+        Ok(ProfileKey::new(res))
     }
 
     pub fn get_blocks_by_key<'a>(
