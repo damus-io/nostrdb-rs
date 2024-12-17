@@ -487,7 +487,7 @@ mod tests {
             let res = ndb.poll_for_notes(sub, 1);
             assert_eq!(res, vec![]);
 
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(150));
             // now we should have something
             let res = ndb.poll_for_notes(sub, 1);
             assert_eq!(res, vec![NoteKey::new(1)]);
