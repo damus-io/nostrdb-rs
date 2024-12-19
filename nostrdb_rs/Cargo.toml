@@ -1,0 +1,31 @@
+[package]
+name = "nostrdb"
+authors = ["William Casarin <jb55@jb55.com>"]
+description = "An unfairly fast embedded nostr database backed by lmdb"
+readme = "README.md"
+version = "0.5.1"
+edition = "2021"
+build = "build.rs"
+license = "GPL-3.0-or-later"
+homepage = "https://github.com/damus-io/nostrdb-rs/"
+repository = "https://github.com/damus-io/nostrdb-rs/"
+
+[build-dependencies]
+cc = "1.0"
+bindgen = "0.69.1"
+
+[features]
+bindgen = []
+
+[dependencies]
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+flatbuffers = "23.5.26"
+libc = "0.2.151"
+futures = "0.3.31"
+
+[dev-dependencies]
+hex = "0.4.3"
