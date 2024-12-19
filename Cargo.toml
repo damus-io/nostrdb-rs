@@ -1,30 +1,27 @@
-[package]
-name = "nostrdb"
-authors = ["William Casarin <jb55@jb55.com>"]
-description = "An unfairly fast embedded nostr database backed by lmdb"
-readme = "README.md"
-version = "0.5.1"
-edition = "2021"
-build = "build.rs"
-license = "GPL-3.0-or-later"
-homepage = "https://github.com/damus-io/nostrdb-rs/"
-repository = "https://github.com/damus-io/nostrdb-rs/"
+[workspace]
+resolver = "2"
+members = [
+    "nostrdb_rs",
+    "nostrdb_net",
+]
 
-[build-dependencies]
-cc = "1.0"
-bindgen = "0.69.1"
-
-[features]
-bindgen = []
-
-[dependencies]
-flatbuffers = "23.5.26"
+[workspace.dependencies]
+bech32 = { version = "0.11", default-features = false }
+dirs = "5.0.1"
+hex = "0.4.3"
 libc = "0.2.151"
+nostrdb_net = { path = "nostrdb_net" } 
+nostrdb = { path = "nostrdb_rs" } 
+nostr = { version = "0.37.0", default-features = false, features = ["std", "nip49"] }
+serde_derive = "1"
+serde_json = "1.0.89"
+serde = { version = "1", features = ["derive"] }
+tempfile = "3.13.0"
 thiserror = "2.0.7"
-futures = "0.3.31"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.16", features = ["macros", "rt-multi-thread"] }
+#tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
-
-[dev-dependencies]
-hex = "0.4.3"
+url = "2.5.2"
+urlencoding = "2.1.3"
+uuid = { version = "1.10.0", features = ["v4"] }
