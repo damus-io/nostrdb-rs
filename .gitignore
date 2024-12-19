@@ -5,3 +5,4 @@ tags
 target/
 .build-result
 .buildcmd
+build.log
