@@ -29,6 +29,11 @@ pub enum Error {
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
 
+    // Secp(secp256k1::Error),
+    #[cfg(feature = "tokio")]
+    #[error("websocket error: {0}")]
+    Websocket(#[from] tungstenite::Error),
+
     #[error("nostrdb error: {0}")]
     Nostrdb(#[from] nostrdb::Error),
 
