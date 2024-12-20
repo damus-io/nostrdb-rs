@@ -19,7 +19,13 @@ pub enum RelayStatus {
 pub struct Relay {
     pub url: String,
     pub status: RelayStatus,
+
+    #[cfg(feature = "tokio")]
+    pub stream: tokio_tungstenite::WebSocketStream<MaybeTlsStream<TcpStream>>,
+
+    #[cfg(not(feature = "tokio"))]
     pub sender: WsSender,
+    #[cfg(not(feature = "tokio"))]
     pub receiver: WsReceiver,
 }
 
@@ -45,7 +51,7 @@ impl PartialEq for Relay {
     }
 }
 
-impl Eq for Relay {}
+impl Eq for Relay { }
 
 impl Relay {
     pub fn new(url: String, wakeup: impl Fn() + Send + Sync + 'static) -> Result<Self> {
@@ -76,6 +82,19 @@ impl Relay {
         self.sender.send(txt);
     }
 
+    #[cfg(feature = "tokio")]
+    pub async fn connect(&mut self) -> Result<()> {
+        use tokio_tungstenite::connect_async;
+
+        let request = self.url.into_client_request()?;
+        let (stream, response) = connect_async(request).await?;
+
+        self.stream = stream;
+
+        Ok(())
+    }
+
+    #[cfg(not(feature = "tokio"))]
     pub fn connect(&mut self, wakeup: impl Fn() + Send + Sync + 'static) -> Result<()> {
         let (sender, receiver) =
             ewebsock::connect_with_wakeup(&self.url, Options::default(), wakeup)?;

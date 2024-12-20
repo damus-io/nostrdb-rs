@@ -7,16 +7,23 @@ use std::time::{Duration, Instant};
 
 use url::Url;
 
-#[cfg(not(target_arch = "wasm32"))]
-use ewebsock::{WsEvent, WsMessage};
+#[cfg(not(feature = "tokio"))]
+use ewebsock::{WsMessage};
 
 #[cfg(not(target_arch = "wasm32"))]
 use tracing::{debug, error};
 
+#[cfg(not(feature = "tokio"))]
+pub type WebsockEvent = ewebsock::WsEvent;
+
+#[cfg(feature = "tokio")]
+pub type WebsockEvent = tungstenite::protocol::Message;
+
 #[derive(Debug)]
 pub struct PoolEvent<'a> {
     pub relay: &'a str,
-    pub event: ewebsock::WsEvent,
+
+    pub event: WebsockEvent,
 }
 
 impl PoolEvent<'_> {
@@ -30,6 +37,11 @@ impl PoolEvent<'_> {
 
 pub struct PoolEventBuf {
     pub relay: String,
+
+    #[cfg(feature = "tokio")]
+    pub event: tungstenite::protocol::Message,
+
+    #[cfg(not(feature = "tokio"))]
     pub event: ewebsock::WsEvent,
 }
 
@@ -213,11 +225,50 @@ impl RelayPool {
         }
     }
 
+    #[cfg(feature = "tokio")]
+    pub async fn recv(&mut self) -> Result<PoolEvent<'_>> {
+        for relay in &mut self.relays {
+            let relay = &mut relay.relay;
+            if let Some(event) = await relay.receiver.recv() {
+                match &event {
+                    Err(WebsockEvent::Opened) => {
+                        relay.status = RelayStatus::Connected;
+                    }
+                    WebsockEvent::Closed => {
+                        relay.status = RelayStatus::Disconnected;
+                    }
+                    WebsockEvent::Error(err) => {
+                        error!("{:?}", err);
+                        relay.status = RelayStatus::Disconnected;
+                    }
+                    WebsockEvent::Message(ev) => {
+                        // let's just handle pongs here.
+                        // We only need to do this natively.
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if let WsMessage::Ping(ref bs) = ev {
+                            debug!("pong {}", &relay.url);
+                            relay.sender.send(WsMessage::Pong(bs.to_owned()));
+                        }
+                    }
+                }
+                return Some(PoolEvent {
+                    event,
+                    relay: &relay.url,
+                });
+            }
+        }
+
+        None
+    }
+
     /// Attempts to receive a pool event from a list of relays. The
     /// function searches each relay in the list in order, attempting to
     /// receive a message from each. If a message is received, return it.
     /// If no message is received from any relays, None is returned.
+    #[cfg(not(feature = "tokio"))]
     pub fn try_recv(&mut self) -> Option<PoolEvent<'_>> {
+        use ewebsock::WsEvent;
+
         for relay in &mut self.relays {
             let relay = &mut relay.relay;
             if let Some(event) = relay.receiver.try_recv() {

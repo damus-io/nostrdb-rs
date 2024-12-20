@@ -17,6 +17,8 @@ hex = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
+tokio-tungstenite = { version = "0.26.1", optional = true }
+tungstenite = { version = "0.26.1", optional = true }
 
 [features]
-tokio = ["ewebsock/tokio"]
+tokio = ["ewebsock/tokio", "tokio-tungstenite", "tungstenite"]
