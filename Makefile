@@ -1,5 +1,5 @@
 
 tags: fake
-	find src -name '*.rs' | xargs ctags
+	find . -name '*.rs' | xargs ctags
 
 .PHONY: fake

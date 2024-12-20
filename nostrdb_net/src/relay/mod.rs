@@ -1,9 +1,20 @@
-use ewebsock::{Options, WsMessage, WsReceiver, WsSender};
+use ewebsock::Options;
+
+#[cfg(not(feature = "tokio"))]
+use ewebsock::{WsMessage, WsReceiver, WsSender};
 
 use crate::{ClientMessage, Result};
 use nostrdb::Filter;
 use std::fmt;
 use std::hash::{Hash, Hasher};
+
+#[cfg(feature = "tokio")]
+use tokio::net::TcpStream;
+#[cfg(feature = "tokio")]
+use tokio_tungstenite::MaybeTlsStream;
+#[cfg(feature = "tokio")]
+use tungstenite::protocol::Message;
+
 use tracing::{debug, error, info};
 
 pub mod message;
@@ -19,7 +30,13 @@ pub enum RelayStatus {
 pub struct Relay {
     pub url: String,
     pub status: RelayStatus,
+
+    #[cfg(feature = "tokio")]
+    pub stream: tokio_tungstenite::WebSocketStream<MaybeTlsStream<TcpStream>>,
+
+    #[cfg(not(feature = "tokio"))]
     pub sender: WsSender,
+    #[cfg(not(feature = "tokio"))]
     pub receiver: WsReceiver,
 }
 
@@ -72,10 +89,33 @@ impl Relay {
             }
         };
 
-        let txt = WsMessage::Text(json);
-        self.sender.send(txt);
+        #[cfg(feature = "tokio")]
+        {
+            let txt = Message::Text(json);
+            self.stream.send(txt);
+        }
+
+        #[cfg(not(feature = "tokio"))]
+        {
+            let txt = WsMessage::Text(json);
+            self.sender.send(txt);
+        }
     }
 
+    #[cfg(feature = "tokio")]
+    pub async fn connect(&mut self) -> Result<()> {
+        use tokio_tungstenite::connect_async;
+        use tungstenite::client::IntoClientRequest;
+
+        let request = self.url.clone().into_client_request()?;
+        let (stream, _response) = connect_async(request).await?;
+
+        self.stream = stream;
+
+        Ok(())
+    }
+
+    #[cfg(not(feature = "tokio"))]
     pub fn connect(&mut self, wakeup: impl Fn() + Send + Sync + 'static) -> Result<()> {
         let (sender, receiver) =
             ewebsock::connect_with_wakeup(&self.url, Options::default(), wakeup)?;
@@ -86,8 +126,17 @@ impl Relay {
     }
 
     pub fn ping(&mut self) {
-        let msg = WsMessage::Ping(vec![]);
-        self.sender.send(msg);
+        #[cfg(not(feature = "tokio"))]
+        {
+            let msg = WsMessage::Ping(vec![]);
+            self.sender.send(msg);
+        }
+
+        #[cfg(feature = "tokio")]
+        {
+            let msg = Message::Ping(vec![]);
+            self.stream.send(msg);
+        }
     }
 
     pub fn subscribe(&mut self, subid: String, filters: Vec<Filter>) {
