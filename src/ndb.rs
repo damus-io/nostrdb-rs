@@ -179,6 +179,12 @@ impl Ndb {
     pub fn unsubscribe(&mut self, sub: Subscription) -> Result<()> {
         let r = unsafe { bindings::ndb_unsubscribe(self.as_ptr(), sub.id()) };
 
+        debug!(
+            "unsubscribed from {}, sub count {}",
+            sub.id(),
+            self.subscription_count()
+        );
+
         // mark the subscription as done if it exists in our stream map
         {
             let mut map = self.subs.lock().unwrap();
