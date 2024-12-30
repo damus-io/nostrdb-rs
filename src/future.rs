@@ -6,6 +6,7 @@ use std::{
 };
 
 use futures::Stream;
+use tracing::error;
 
 /// Used to track query futures
 #[derive(Debug, Clone)]
@@ -23,6 +24,7 @@ pub struct SubscriptionStream {
     ndb: Ndb,
     sub_id: Subscription,
     max_notes: u32,
+    unsubscribe_on_drop: bool,
 }
 
 impl SubscriptionStream {
@@ -30,15 +32,24 @@ impl SubscriptionStream {
         // Most of the time we only want to fetch a few things. If expecting
         // lots of data, use `set_max_notes_per_await`
         let max_notes = 32;
+        let unsubscribe_on_drop = true;
         SubscriptionStream {
             ndb,
             sub_id,
+            unsubscribe_on_drop,
             max_notes,
         }
     }
 
     pub fn notes_per_await(mut self, max_notes: u32) -> Self {
         self.max_notes = max_notes;
+        self
+    }
+
+    /// Unsubscribe the subscription when this stream goes out of scope. On
+    /// by default. Recommended unless you want subscription leaks.
+    pub fn unsubscribe_on_drop(mut self, yes: bool) -> Self {
+        self.unsubscribe_on_drop = yes;
         self
     }
 
@@ -50,8 +61,17 @@ impl SubscriptionStream {
 impl Drop for SubscriptionStream {
     fn drop(&mut self) {
         // Perform cleanup here, like removing the subscription from the global map
-        let mut map = self.ndb.subs.lock().unwrap();
-        map.remove(&self.sub_id);
+        {
+            let mut map = self.ndb.subs.lock().unwrap();
+            map.remove(&self.sub_id);
+        }
+        // unsubscribe
+        if let Err(err) = self.ndb.unsubscribe(self.sub_id) {
+            error!(
+                "Error unsubscribing from {} in SubscriptionStream Drop: {err}",
+                self.sub_id.id()
+            );
+        }
     }
 }
 
