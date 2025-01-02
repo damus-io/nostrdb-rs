@@ -142,6 +142,26 @@ impl Ndb {
         Ok(())
     }
 
+    /// Ingest a client-sent event in the form `["EVENT", {"id:"...}]`
+    /// This function returns immediately and doesn't provide any information on
+    /// if ingestion was successful or not.
+    pub fn process_client_event(&self, json: &str) -> Result<()> {
+        // Convert the Rust string to a C-style string
+        let c_json = CString::new(json).expect("CString::new failed");
+        let c_json_ptr = c_json.as_ptr();
+
+        // Get the length of the string
+        let len = json.len() as libc::c_int;
+
+        let res = unsafe { bindings::ndb_process_client_event(self.as_ptr(), c_json_ptr, len) };
+
+        if res == 0 {
+            return Err(Error::NoteProcessFailed);
+        }
+
+        Ok(())
+    }
+
     pub fn query<'a>(
         &self,
         txn: &'a Transaction,
