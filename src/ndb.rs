@@ -567,7 +567,7 @@ mod tests {
         test_util::cleanup_db(&db);
 
         {
-            let mut ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
             let sub_id = {
                 let filter = Filter::new().kinds(vec![1]).build();
                 let filters = vec![filter];
