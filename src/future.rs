@@ -11,7 +11,6 @@ use tracing::error;
 /// Used to track query futures
 #[derive(Debug, Clone)]
 pub(crate) struct SubscriptionState {
-    pub ready: bool,
     pub done: bool,
     pub waker: Option<std::task::Waker>,
 }
@@ -83,7 +82,6 @@ impl Stream for SubscriptionStream {
         let me = pinned.as_ref().get_ref();
         let mut map = me.ndb.subs.lock().unwrap();
         let sub_state = map.entry(me.sub_id).or_insert(SubscriptionState {
-            ready: false,
             done: false,
             waker: None,
         });
@@ -93,10 +91,8 @@ impl Stream for SubscriptionStream {
             return Poll::Ready(None);
         }
 
-        if sub_state.ready {
-            // Reset ready, fetch notes
-            sub_state.ready = false;
-            let notes = me.ndb.poll_for_notes(me.sub_id, me.max_notes);
+        let notes = me.ndb.poll_for_notes(me.sub_id, me.max_notes);
+        if !notes.is_empty() {
             return Poll::Ready(Some(notes));
         }
 

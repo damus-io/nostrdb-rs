@@ -80,7 +80,6 @@ impl Ndb {
         let mut config = config.set_sub_callback(move |sub_id: u64| {
             let mut map = subs_clone.lock().unwrap();
             if let Some(s) = map.get_mut(&Subscription::new(sub_id)) {
-                s.ready = true;
                 if let Some(w) = s.waker.take() {
                     w.wake();
                 }
