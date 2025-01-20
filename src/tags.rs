@@ -26,6 +26,14 @@ impl<'n> Tag<'n> {
         NdbStr::new(nstr, self.note.clone())
     }
 
+    pub fn get_str(&self, ind: u16) -> Option<&'n str> {
+        self.get(ind).and_then(|s| s.str())
+    }
+
+    pub fn get_id(&self, ind: u16) -> Option<&'n [u8; 32]> {
+        self.get(ind).and_then(|s| s.id())
+    }
+
     pub fn get(&self, ind: u16) -> Option<NdbStr<'n>> {
         if ind >= self.count() {
             return None;

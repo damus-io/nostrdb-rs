@@ -58,6 +58,14 @@ impl<'a> NdbStr<'a> {
         }
     }
 
+    pub fn id(&self) -> Option<&'a [u8; 32]> {
+        self.variant().id()
+    }
+
+    pub fn str(&self) -> Option<&'a str> {
+        self.variant().str()
+    }
+
     pub fn variant(&self) -> NdbStrVariant<'a> {
         if self.ndb_str.flag == (bindings::NDB_PACKED_ID as u8) {
             unsafe { NdbStrVariant::Id(&*(self.ndb_str.id() as *const [u8; 32])) }
