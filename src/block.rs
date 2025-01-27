@@ -379,4 +379,55 @@ mod tests {
 
         test_util::cleanup_db(&db);
     }
+
+    #[test]
+    fn nprofile_relays_work() {
+        let db = "target/testdbs/nprofile_relays";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            ndb.process_event("[\"EVENT\",\"s\",{\"kind\":1,\"id\":\"06449981af8f0e00503ea88deb6c2d3e9d65e1e4f032744d9ca4949dce1ce296\",\"pubkey\":\"850605096dbfb50b929e38a6c26c3d56c425325c85e05de29b759bc0e5d6cebc\",\"created_at\":1737747111,\"tags\":[[\"p\",\"3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d\"]],\"content\":\"This sample event has the mention example from NIP-19: nostr:nprofile1qqsrhuxx8l9ex335q7he0f09aej04zpazpl0ne2cgukyawd24mayt8gpp4mhxue69uhhytnc9e3k7mgpz4mhxue69uhkg6nzv9ejuumpv34kytnrdaksjlyr9p\nPls ignore ...\",\"sig\":\"26a4d8f51af0ca7f6c7140ba2487ed4a99edc03e95692e01e636917417dac78989e735559a3a05e1805f242aa634c545fd4d820b962c19301faa55b05bea5da7\"}]").expect("process ok");
+        }
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            let id =
+                hex::decode("06449981af8f0e00503ea88deb6c2d3e9d65e1e4f032744d9ca4949dce1ce296")
+                    .expect("hex id");
+            let pubkey =
+                hex::decode("3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d")
+                    .expect("fiatjaf pubkey");
+            let txn = Transaction::new(&ndb).expect("txn");
+            let id_bytes: [u8; 32] = id.try_into().expect("id bytes");
+            let pubkey_bytes: [u8; 32] = pubkey.try_into().expect("pubkey bytes");
+
+            let note = ndb.get_note_by_id(&txn, &id_bytes).unwrap();
+            let blocks = ndb
+                .get_blocks_by_key(&txn, note.key().unwrap())
+                .expect("note");
+
+            let mut nprofile_check = false;
+
+            for (ndx, block) in blocks.iter(&note).enumerate() {
+                println!("block {}: {:?}: {:?}", ndx, block.blocktype(), &block);
+                if block.blocktype() == BlockType::MentionBech32 {
+                    // https://github.com/nostr-protocol/nips/blob/master/19.md#examples
+                    assert_eq!(
+                        block.as_str(), "nprofile1qqsrhuxx8l9ex335q7he0f09aej04zpazpl0ne2cgukyawd24mayt8gpp4mhxue69uhhytnc9e3k7mgpz4mhxue69uhkg6nzv9ejuumpv34kytnrdaksjlyr9p"
+                    );
+
+                    if let Mention::Profile(p) = block.as_mention().unwrap() {
+                        assert_eq!(p.pubkey(), &pubkey_bytes);
+                        assert_eq!(p.relays.num_relays, 2);
+                        assert_eq!(p.relays.relays[0].as_str(), "wss://r.x.com");
+                        assert_eq!(p.relays.relays[1].as_str(), "wss://djbas.sadkb.com");
+                        nprofile_check = true;
+                    }
+                }
+            }
+            assert!(nprofile_check, "Expected nprofile block was not found");
+        }
+
+        test_util::cleanup_db(&db);
+    }
 }
