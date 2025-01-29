@@ -62,21 +62,13 @@ impl NoteReplyBuf {
                 continue;
             }
 
-            if self
-                .root
-                .as_ref()
-                .map_or(false, |x| x.index == index as u16)
-            {
+            if self.root.as_ref().is_some_and(|x| x.index == index as u16) {
                 root = Some(tag_to_note_id_ref(
                     tag,
                     self.root.as_ref().unwrap().marker,
                     index,
                 ))
-            } else if self
-                .reply
-                .as_ref()
-                .map_or(false, |x| x.index == index as u16)
-            {
+            } else if self.reply.as_ref().is_some_and(|x| x.index == index as u16) {
                 reply = Some(tag_to_note_id_ref(
                     tag,
                     self.reply.as_ref().unwrap().marker,
@@ -85,7 +77,7 @@ impl NoteReplyBuf {
             } else if self
                 .mention
                 .as_ref()
-                .map_or(false, |x| x.index == index as u16)
+                .is_some_and(|x| x.index == index as u16)
             {
                 mention = Some(tag_to_note_id_ref(
                     tag,
