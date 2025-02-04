@@ -71,6 +71,12 @@ impl bindings::bech32_nprofile {
     pub fn pubkey(&self) -> &[u8; 32] {
         unsafe { &*(self.pubkey as *const [u8; 32]) }
     }
+
+    pub fn relays_iter(&self) -> impl Iterator<Item = &str> {
+        self.relays.relays[0..(self.relays.num_relays as usize)]
+            .iter()
+            .map(|block| block.as_str())
+    }
 }
 
 impl bindings::bech32_npub {
@@ -97,6 +103,20 @@ impl bindings::bech32_nevent {
             }
             Some(&*(self.pubkey as *const [u8; 32]))
         }
+    }
+
+    pub fn relays_iter(&self) -> impl Iterator<Item = &str> {
+        self.relays.relays[0..(self.relays.num_relays as usize)]
+            .iter()
+            .map(|block| block.as_str())
+    }
+}
+
+impl bindings::bech32_naddr {
+    pub fn relays_iter(&self) -> impl Iterator<Item = &str> {
+        self.relays.relays[0..(self.relays.num_relays as usize)]
+            .iter()
+            .map(|block| block.as_str())
     }
 }
 
@@ -421,6 +441,8 @@ mod tests {
                         assert_eq!(p.relays.num_relays, 2);
                         assert_eq!(p.relays.relays[0].as_str(), "wss://r.x.com");
                         assert_eq!(p.relays.relays[1].as_str(), "wss://djbas.sadkb.com");
+                        let relays: Vec<&str> = p.relays_iter().collect();
+                        assert_eq!(relays, vec!["wss://r.x.com", "wss://djbas.sadkb.com"]);
                         nprofile_check = true;
                     }
                 }
