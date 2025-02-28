@@ -1,5 +1,6 @@
 use crate::{bindings, Error, FilterError, Note, Result};
 use std::ffi::CString;
+use std::fmt;
 use std::os::raw::c_char;
 use std::ptr::null_mut;
 use tracing::debug;
@@ -12,6 +13,12 @@ pub struct FilterBuilder {
 #[derive(Debug)]
 pub struct Filter {
     pub data: bindings::ndb_filter,
+}
+
+impl fmt::Display for Filter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.json())
+    }
 }
 
 impl Clone for Filter {
