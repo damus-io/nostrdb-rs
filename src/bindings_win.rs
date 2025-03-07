@@ -355,6 +355,9 @@ pub const NDB_PACKED_STR: u32 = 1;
 pub const NDB_PACKED_ID: u32 = 2;
 pub const NDB_FLAG_NOMIGRATE: u32 = 1;
 pub const NDB_FLAG_SKIP_NOTE_VERIFY: u32 = 2;
+pub const NDB_FLAG_NO_FULLTEXT: u32 = 4;
+pub const NDB_FLAG_NO_NOTE_BLOCKS: u32 = 8;
+pub const NDB_FLAG_NO_STATS: u32 = 16;
 pub const NDB_NUM_FILTERS: u32 = 7;
 pub const MAX_TEXT_SEARCH_RESULTS: u32 = 128;
 pub const MAX_TEXT_SEARCH_WORDS: u32 = 8;
@@ -3262,6 +3265,7 @@ pub const ndb_filter_fieldtype_NDB_FILTER_TAGS: ndb_filter_fieldtype = 4;
 pub const ndb_filter_fieldtype_NDB_FILTER_SINCE: ndb_filter_fieldtype = 5;
 pub const ndb_filter_fieldtype_NDB_FILTER_UNTIL: ndb_filter_fieldtype = 6;
 pub const ndb_filter_fieldtype_NDB_FILTER_LIMIT: ndb_filter_fieldtype = 7;
+pub const ndb_filter_fieldtype_NDB_FILTER_SEARCH: ndb_filter_fieldtype = 8;
 pub type ndb_filter_fieldtype = ::std::os::raw::c_int;
 pub const ndb_generic_element_type_NDB_ELEMENT_UNKNOWN: ndb_generic_element_type = 0;
 pub const ndb_generic_element_type_NDB_ELEMENT_STRING: ndb_generic_element_type = 1;
@@ -3283,7 +3287,9 @@ pub const ndb_dbs_NDB_DB_NOTE_KIND: ndb_dbs = 8;
 pub const ndb_dbs_NDB_DB_NOTE_TEXT: ndb_dbs = 9;
 pub const ndb_dbs_NDB_DB_NOTE_BLOCKS: ndb_dbs = 10;
 pub const ndb_dbs_NDB_DB_NOTE_TAGS: ndb_dbs = 11;
-pub const ndb_dbs_NDB_DBS: ndb_dbs = 12;
+pub const ndb_dbs_NDB_DB_NOTE_PUBKEY: ndb_dbs = 12;
+pub const ndb_dbs_NDB_DB_NOTE_PUBKEY_KIND: ndb_dbs = 13;
+pub const ndb_dbs_NDB_DBS: ndb_dbs = 14;
 pub type ndb_dbs = ::std::os::raw::c_int;
 pub const ndb_common_kind_NDB_CKIND_PROFILE: ndb_common_kind = 0;
 pub const ndb_common_kind_NDB_CKIND_TEXT: ndb_common_kind = 1;
@@ -3914,7 +3920,7 @@ fn bindgen_test_layout_ndb_stat_counts() {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ndb_stat {
-    pub dbs: [ndb_stat_counts; 12usize],
+    pub dbs: [ndb_stat_counts; 14usize],
     pub common_kinds: [ndb_stat_counts; 15usize],
     pub other_kinds: ndb_stat_counts,
 }
@@ -3924,7 +3930,7 @@ fn bindgen_test_layout_ndb_stat() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<ndb_stat>(),
-        672usize,
+        720usize,
         concat!("Size of: ", stringify!(ndb_stat))
     );
     assert_eq!(
@@ -3944,7 +3950,7 @@ fn bindgen_test_layout_ndb_stat() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).common_kinds) as usize - ptr as usize },
-        288usize,
+        336usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_stat),
@@ -3954,7 +3960,7 @@ fn bindgen_test_layout_ndb_stat() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).other_kinds) as usize - ptr as usize },
-        648usize,
+        696usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_stat),
@@ -4042,6 +4048,8 @@ fn bindgen_test_layout_ndb_text_search_key() {
 pub struct ndb_text_search_result {
     pub key: ndb_text_search_key,
     pub prefix_chars: ::std::os::raw::c_int,
+    pub note: *mut ndb_note,
+    pub note_size: u64,
 }
 #[test]
 fn bindgen_test_layout_ndb_text_search_result() {
@@ -4050,7 +4058,7 @@ fn bindgen_test_layout_ndb_text_search_result() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<ndb_text_search_result>(),
-        48usize,
+        64usize,
         concat!("Size of: ", stringify!(ndb_text_search_result))
     );
     assert_eq!(
@@ -4078,6 +4086,26 @@ fn bindgen_test_layout_ndb_text_search_result() {
             stringify!(prefix_chars)
         )
     );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).note) as usize - ptr as usize },
+        48usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_text_search_result),
+            "::",
+            stringify!(note)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).note_size) as usize - ptr as usize },
+        56usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_text_search_result),
+            "::",
+            stringify!(note_size)
+        )
+    );
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -4092,7 +4120,7 @@ fn bindgen_test_layout_ndb_text_search_results() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<ndb_text_search_results>(),
-        6152usize,
+        8200usize,
         concat!("Size of: ", stringify!(ndb_text_search_results))
     );
     assert_eq!(
@@ -4112,7 +4140,7 @@ fn bindgen_test_layout_ndb_text_search_results() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).num_results) as usize - ptr as usize },
-        6144usize,
+        8192usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_text_search_results),
@@ -5053,7 +5081,7 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
-    pub fn ndb_db_version(ndb: *mut ndb) -> ::std::os::raw::c_int;
+    pub fn ndb_db_version(txn: *mut ndb_txn) -> ::std::os::raw::c_int;
 }
 extern "C" {
     pub fn ndb_process_event(
@@ -5245,6 +5273,13 @@ extern "C" {
     pub fn ndb_filter_init(arg1: *mut ndb_filter) -> ::std::os::raw::c_int;
 }
 extern "C" {
+    #[doc = " Allocate a filter with a fixed sized buffer (where pages is number of 4096-byte sized blocks)\n You can set pages to 1 if you know you are constructing small filters"]
+    pub fn ndb_filter_init_with(
+        filter: *mut ndb_filter,
+        pages: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
     pub fn ndb_filter_add_id_element(
         arg1: *mut ndb_filter,
         id: *const ::std::os::raw::c_uchar,
@@ -5379,18 +5414,20 @@ extern "C" {
     pub fn ndb_num_subscriptions(arg1: *mut ndb) -> ::std::os::raw::c_int;
 }
 extern "C" {
-    pub fn ndb_subscription_filters(
-        arg1: *mut ndb,
-        subid: u64,
-        filters: *mut ::std::os::raw::c_int,
-    ) -> *mut ndb_filter;
-}
-extern "C" {
     pub fn ndb_text_search(
         txn: *mut ndb_txn,
         query: *const ::std::os::raw::c_char,
         arg1: *mut ndb_text_search_results,
         arg2: *mut ndb_text_search_config,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_text_search_with(
+        txn: *mut ndb_txn,
+        query: *const ::std::os::raw::c_char,
+        arg1: *mut ndb_text_search_results,
+        arg2: *mut ndb_text_search_config,
+        filter: *mut ndb_filter,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
