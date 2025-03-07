@@ -119,6 +119,9 @@ impl Filter {
         let mut builder = Filter::new();
         for field in filter {
             match field {
+                FilterField::Search(search) => {
+                    builder = builder.search(search);
+                }
                 FilterField::Ids(ids) => {
                     builder = builder.ids(ids);
                 }
@@ -388,6 +391,10 @@ impl FilterBuilder {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_IDS)
     }
 
+    pub fn start_search_field(&mut self) -> Result<()> {
+        self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_SEARCH)
+    }
+
     #[allow(dead_code)]
     pub fn start_events_field(&mut self) -> Result<()> {
         self.start_tags_field('e')
@@ -427,6 +434,13 @@ impl FilterBuilder {
     pub fn event(mut self, id: &[u8; 32]) -> Self {
         self.start_tag_field('e').unwrap();
         self.add_id_element(id).unwrap();
+        self.end_field();
+        self
+    }
+
+    pub fn search(mut self, search: &str) -> Self {
+        self.start_search_field().unwrap();
+        self.add_str_element(search).unwrap();
         self.end_field();
         self
     }
@@ -703,6 +717,7 @@ pub enum FilterField<'a> {
     Authors(FilterIdElements<'a>),
     Kinds(FilterIntElements<'a>),
     Tags(char, FilterElements<'a>),
+    Search(&'a str),
     Since(u64),
     Until(u64),
     Limit(u64),
@@ -717,6 +732,16 @@ pub enum MutFilterField<'a> {
 impl<'a> FilterField<'a> {
     pub fn new(elements: FilterElements<'a>) -> Self {
         match elements.fieldtype() {
+            FilterFieldType::Search => {
+                for element in elements {
+                    if let FilterElement::Str(s) = element {
+                        return FilterField::Search(s);
+                    }
+                }
+
+                panic!("something is very wrong");
+            }
+
             FilterFieldType::Ids => {
                 FilterField::Ids(FilterIdElements::new(elements.filter(), elements.as_ptr()))
             }
@@ -882,6 +907,7 @@ pub enum FilterFieldType {
     Since,
     Until,
     Limit,
+    Search,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -923,6 +949,8 @@ impl FilterFieldType {
             Some(FilterFieldType::Until)
         } else if val == bindings::ndb_filter_fieldtype_NDB_FILTER_LIMIT {
             Some(FilterFieldType::Limit)
+        } else if val == bindings::ndb_filter_fieldtype_NDB_FILTER_SEARCH {
+            Some(FilterFieldType::Search)
         } else {
             None
         }
