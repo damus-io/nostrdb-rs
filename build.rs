@@ -120,7 +120,7 @@ fn main() {
     }
 
     // Link Security framework on macOS
-    if cfg!(target_os = "macos") {
+    if env::var("TARGET").unwrap().contains("apple") {
         println!("cargo:rustc-link-lib=framework=Security");
     }
 
