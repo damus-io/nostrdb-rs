@@ -120,7 +120,7 @@ fn main() {
     }
 
     // Link Security framework on macOS
-    if env::var("TARGET").unwrap().contains("apple") {
+    if std::env::var("CARGO_CFG_TARGET_VENDOR").unwrap() == "apple" {
         println!("cargo:rustc-link-lib=framework=Security");
     }
 
