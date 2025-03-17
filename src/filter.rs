@@ -16,7 +16,26 @@ pub struct Filter {
 
 impl Clone for Filter {
     fn clone(&self) -> Self {
-        let mut new_filter: bindings::ndb_filter = Default::default();
+        // Default inits...
+        //let mut new_filter: bindings::ndb_filter = Default::default();
+        let null = null_mut();
+        let mut new_filter = bindings::ndb_filter {
+            finalized: 0,
+            elem_buf: bindings::cursor {
+                start: null,
+                p: null,
+                end: null,
+            },
+            data_buf: bindings::cursor {
+                start: null,
+                p: null,
+                end: null,
+            },
+            num_elements: 0,
+            current: -1,
+            elements: [0, 0, 0, 0, 0, 0, 0],
+        };
+
         debug!("cloning filter");
         unsafe {
             bindings::ndb_filter_clone(
@@ -571,6 +590,12 @@ impl Drop for Filter {
     fn drop(&mut self) {
         debug!("dropping filter {:?}", self);
         unsafe { bindings::ndb_filter_destroy(self.as_mut_ptr()) };
+    }
+}
+
+impl Drop for FilterBuilder {
+    fn drop(&mut self) {
+        debug!("dropping filter builder");
     }
 }
 
