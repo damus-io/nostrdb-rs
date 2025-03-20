@@ -3264,6 +3264,47 @@ fn bindgen_test_layout_ndb_str() {
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct ndb_ingest_meta {
+    pub client: ::std::os::raw::c_uint,
+    pub relay: *const ::std::os::raw::c_char,
+}
+#[test]
+fn bindgen_test_layout_ndb_ingest_meta() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_ingest_meta> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_ingest_meta>(),
+        16usize,
+        concat!("Size of: ", stringify!(ndb_ingest_meta))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_ingest_meta>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_ingest_meta))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).client) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_ingest_meta),
+            "::",
+            stringify!(client)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).relay) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_ingest_meta),
+            "::",
+            stringify!(relay)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct ndb_keypair {
     pub pubkey: [::std::os::raw::c_uchar; 32usize],
     pub secret: [::std::os::raw::c_uchar; 32usize],
@@ -3797,7 +3838,9 @@ pub const ndb_dbs_NDB_DB_NOTE_BLOCKS: ndb_dbs = 10;
 pub const ndb_dbs_NDB_DB_NOTE_TAGS: ndb_dbs = 11;
 pub const ndb_dbs_NDB_DB_NOTE_PUBKEY: ndb_dbs = 12;
 pub const ndb_dbs_NDB_DB_NOTE_PUBKEY_KIND: ndb_dbs = 13;
-pub const ndb_dbs_NDB_DBS: ndb_dbs = 14;
+pub const ndb_dbs_NDB_DB_NOTE_RELAY_KIND: ndb_dbs = 14;
+pub const ndb_dbs_NDB_DB_NOTE_RELAYS: ndb_dbs = 15;
+pub const ndb_dbs_NDB_DBS: ndb_dbs = 16;
 pub type ndb_dbs = ::std::os::raw::c_uint;
 pub const ndb_common_kind_NDB_CKIND_PROFILE: ndb_common_kind = 0;
 pub const ndb_common_kind_NDB_CKIND_TEXT: ndb_common_kind = 1;
@@ -3898,6 +3941,70 @@ fn bindgen_test_layout_ndb_builder() {
             stringify!(ndb_builder),
             "::",
             stringify!(current_tag)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_note_relay_iterator {
+    pub txn: *mut ndb_txn,
+    pub note_key: u64,
+    pub cursor_op: ::std::os::raw::c_int,
+    pub mdb_cur: *mut ::std::os::raw::c_void,
+}
+#[test]
+fn bindgen_test_layout_ndb_note_relay_iterator() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_note_relay_iterator> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_note_relay_iterator>(),
+        32usize,
+        concat!("Size of: ", stringify!(ndb_note_relay_iterator))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_note_relay_iterator>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_note_relay_iterator))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).txn) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_relay_iterator),
+            "::",
+            stringify!(txn)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).note_key) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_relay_iterator),
+            "::",
+            stringify!(note_key)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).cursor_op) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_relay_iterator),
+            "::",
+            stringify!(cursor_op)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).mdb_cur) as usize - ptr as usize },
+        24usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_relay_iterator),
+            "::",
+            stringify!(mdb_cur)
         )
     );
 }
@@ -4240,6 +4347,7 @@ fn bindgen_test_layout_ndb_filter() {
 pub struct ndb_config {
     pub flags: ::std::os::raw::c_int,
     pub ingester_threads: ::std::os::raw::c_int,
+    pub writer_scratch_buffer_size: ::std::os::raw::c_int,
     pub mapsize: usize,
     pub filter_context: *mut ::std::os::raw::c_void,
     pub ingest_filter: ndb_ingest_filter_fn,
@@ -4252,7 +4360,7 @@ fn bindgen_test_layout_ndb_config() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<ndb_config>(),
-        48usize,
+        56usize,
         concat!("Size of: ", stringify!(ndb_config))
     );
     assert_eq!(
@@ -4281,8 +4389,18 @@ fn bindgen_test_layout_ndb_config() {
         )
     );
     assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).mapsize) as usize - ptr as usize },
+        unsafe { ::std::ptr::addr_of!((*ptr).writer_scratch_buffer_size) as usize - ptr as usize },
         8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_config),
+            "::",
+            stringify!(writer_scratch_buffer_size)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).mapsize) as usize - ptr as usize },
+        16usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_config),
@@ -4292,7 +4410,7 @@ fn bindgen_test_layout_ndb_config() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).filter_context) as usize - ptr as usize },
-        16usize,
+        24usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_config),
@@ -4302,7 +4420,7 @@ fn bindgen_test_layout_ndb_config() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).ingest_filter) as usize - ptr as usize },
-        24usize,
+        32usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_config),
@@ -4312,7 +4430,7 @@ fn bindgen_test_layout_ndb_config() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).sub_cb_ctx) as usize - ptr as usize },
-        32usize,
+        40usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_config),
@@ -4322,7 +4440,7 @@ fn bindgen_test_layout_ndb_config() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).sub_cb) as usize - ptr as usize },
-        40usize,
+        48usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_config),
@@ -4428,7 +4546,7 @@ fn bindgen_test_layout_ndb_stat_counts() {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ndb_stat {
-    pub dbs: [ndb_stat_counts; 14usize],
+    pub dbs: [ndb_stat_counts; 16usize],
     pub common_kinds: [ndb_stat_counts; 15usize],
     pub other_kinds: ndb_stat_counts,
 }
@@ -4438,7 +4556,7 @@ fn bindgen_test_layout_ndb_stat() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<ndb_stat>(),
-        720usize,
+        768usize,
         concat!("Size of: ", stringify!(ndb_stat))
     );
     assert_eq!(
@@ -4458,7 +4576,7 @@ fn bindgen_test_layout_ndb_stat() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).common_kinds) as usize - ptr as usize },
-        336usize,
+        384usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_stat),
@@ -4468,7 +4586,7 @@ fn bindgen_test_layout_ndb_stat() {
     );
     assert_eq!(
         unsafe { ::std::ptr::addr_of!((*ptr).other_kinds) as usize - ptr as usize },
-        696usize,
+        744usize,
         concat!(
             "Offset of field: ",
             stringify!(ndb_stat),
@@ -5551,6 +5669,13 @@ extern "C" {
     );
 }
 extern "C" {
+    #[doc = " Configurable scratch buffer size for the writer thread. Default is 2MB. If you have smaller notes\n you can decrease this to reduce memory usage. If you have bigger notes you should increase this so\n that the writer thread can properly parse larger notes."]
+    pub fn ndb_config_set_writer_scratch_buffer_size(
+        config: *mut ndb_config,
+        scratch_size: ::std::os::raw::c_int,
+    );
+}
+extern "C" {
     pub fn ndb_calculate_id(
         note: *mut ndb_note,
         buf: *mut ::std::os::raw::c_uchar,
@@ -5599,10 +5724,33 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
+    pub fn ndb_ingest_meta_init(
+        meta: *mut ndb_ingest_meta,
+        client: ::std::os::raw::c_uint,
+        relay: *const ::std::os::raw::c_char,
+    );
+}
+extern "C" {
+    pub fn ndb_process_event_with(
+        arg1: *mut ndb,
+        json: *const ::std::os::raw::c_char,
+        len: ::std::os::raw::c_int,
+        meta: *mut ndb_ingest_meta,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
     pub fn ndb_process_events(
         arg1: *mut ndb,
         ldjson: *const ::std::os::raw::c_char,
         len: usize,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_process_events_with(
+        ndb: *mut ndb,
+        ldjson: *const ::std::os::raw::c_char,
+        json_len: usize,
+        meta: *mut ndb_ingest_meta,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
@@ -5695,6 +5843,13 @@ extern "C" {
         id: *const ::std::os::raw::c_uchar,
         len: *mut usize,
     ) -> *mut ::std::os::raw::c_void;
+}
+extern "C" {
+    pub fn ndb_note_seen_on_relay(
+        txn: *mut ndb_txn,
+        note_key: u64,
+        relay: *const ::std::os::raw::c_char,
+    ) -> ::std::os::raw::c_int;
 }
 extern "C" {
     pub fn ndb_destroy(arg1: *mut ndb);
@@ -6034,6 +6189,21 @@ extern "C" {
         tag: *mut ndb_tag,
         ind: ::std::os::raw::c_int,
     ) -> ndb_str;
+}
+extern "C" {
+    pub fn ndb_note_relay_iterate_start(
+        txn: *mut ndb_txn,
+        iter: *mut ndb_note_relay_iterator,
+        note_key: u64,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_note_relay_iterate_next(
+        iter: *mut ndb_note_relay_iterator,
+    ) -> *const ::std::os::raw::c_char;
+}
+extern "C" {
+    pub fn ndb_note_relay_iterate_close(iter: *mut ndb_note_relay_iterator);
 }
 extern "C" {
     pub fn ndb_db_name(db: ndb_dbs) -> *const ::std::os::raw::c_char;

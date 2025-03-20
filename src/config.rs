@@ -20,6 +20,7 @@ impl Config {
             ingest_filter: None,
             flags: 0,
             ingester_threads: 0,
+            writer_scratch_buffer_size: 1 * 1024 * 1024,
             mapsize: 0,
         };
 
