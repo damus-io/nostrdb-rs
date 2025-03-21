@@ -524,13 +524,13 @@ impl FilterBuilder {
         self
     }
 
-    pub fn tags<I>(mut self, tags: I, tag: char) -> Self
+    pub fn tags<'a, I>(mut self, tags: I, tag: char) -> Self
     where
-        I: IntoIterator<Item = String>,
+        I: IntoIterator<Item = &'a str>,
     {
         self.start_tag_field(tag).unwrap();
         for tag in tags {
-            self.add_str_element(&tag).unwrap();
+            self.add_str_element(tag).unwrap();
         }
         self.end_field();
         self
