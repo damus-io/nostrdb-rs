@@ -27,6 +27,9 @@ pub enum Error {
     #[error("Buffer overflow")]
     BufferOverflow,
 
+    #[error("CString failed")]
+    CString(#[from] std::ffi::NulError),
+
     #[error("Filter error: {0}")]
     Filter(#[from] FilterError),
 

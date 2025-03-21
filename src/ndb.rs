@@ -3,8 +3,9 @@ use std::ptr;
 
 use crate::bindings::ndb_search;
 use crate::{
-    bindings, Blocks, Config, Error, Filter, Note, NoteKey, ProfileKey, ProfileRecord, QueryResult,
-    Result, Subscription, SubscriptionState, SubscriptionStream, Transaction,
+    bindings, Blocks, Config, Error, Filter, IngestMetadata, Note, NoteKey, ProfileKey,
+    ProfileRecord, QueryResult, Result, Subscription, SubscriptionState, SubscriptionStream,
+    Transaction,
 };
 use futures::StreamExt;
 use std::collections::hash_map::Entry;
@@ -122,18 +123,20 @@ impl Ndb {
         Ok(Ndb { refs, subs })
     }
 
-    /// Ingest a relay-sent event in the form `["EVENT","subid", {"id:"...}]`
+    /// Ingest a relay or client sent event, with optional relay metadata.
     /// This function returns immediately and doesn't provide any information on
     /// if ingestion was successful or not.
-    pub fn process_event(&self, json: &str) -> Result<()> {
+    pub fn process_event_with(&self, json: &str, mut meta: IngestMetadata) -> Result<()> {
         // Convert the Rust string to a C-style string
-        let c_json = CString::new(json).expect("CString::new failed");
+        let c_json = CString::new(json)?;
         let c_json_ptr = c_json.as_ptr();
 
         // Get the length of the string
         let len = json.len() as libc::c_int;
 
-        let res = unsafe { bindings::ndb_process_event(self.as_ptr(), c_json_ptr, len) };
+        let res = unsafe {
+            bindings::ndb_process_event_with(self.as_ptr(), c_json_ptr, len, meta.as_mut_ptr())
+        };
 
         if res == 0 {
             return Err(Error::NoteProcessFailed);
@@ -142,24 +145,24 @@ impl Ndb {
         Ok(())
     }
 
+    /// Ingest a relay-sent event in the form `["EVENT","subid", {"id:"...}]`
+    /// This function returns immediately and doesn't provide any information on
+    /// if ingestion was successful or not.
+    #[deprecated(
+        note = "Use `process_event_with` with IngestMetadata::new().client(false).relay(...)"
+    )]
+    pub fn process_event(&self, json: &str) -> Result<()> {
+        self.process_event_with(json, IngestMetadata::new().client(false))
+    }
+
     /// Ingest a client-sent event in the form `["EVENT", {"id:"...}]`
     /// This function returns immediately and doesn't provide any information on
     /// if ingestion was successful or not.
+    #[deprecated(
+        note = "Use `process_event_with` with IngestMetadata::new().client(true).relay(...)"
+    )]
     pub fn process_client_event(&self, json: &str) -> Result<()> {
-        // Convert the Rust string to a C-style string
-        let c_json = CString::new(json).expect("CString::new failed");
-        let c_json_ptr = c_json.as_ptr();
-
-        // Get the length of the string
-        let len = json.len() as libc::c_int;
-
-        let res = unsafe { bindings::ndb_process_client_event(self.as_ptr(), c_json_ptr, len) };
-
-        if res == 0 {
-            return Err(Error::NoteProcessFailed);
-        }
-
-        Ok(())
+        self.process_event_with(json, IngestMetadata::new().client(true))
     }
 
     pub fn query<'a>(

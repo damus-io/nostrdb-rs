@@ -1,8 +1,5 @@
-use crate::tags::Tags;
-use crate::transaction::Transaction;
-use crate::{bindings, Error};
-use ::std::os::raw::c_uchar;
-use std::hash::Hash;
+use crate::{bindings, tags::Tags, transaction::Transaction, Error, NoteRelays};
+use std::{hash::Hash, os::raw::c_uchar};
 
 #[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub struct NoteKey(u64);
@@ -149,6 +146,16 @@ impl<'a> Note<'a> {
             Note::Transactional { transaction, .. } => Some(transaction),
             _ => None,
         }
+    }
+
+    /// Returns a database cursor that iterates over all of the relays
+    /// that the note has been seen on
+    pub fn relays(&self, txn: &'a Transaction) -> NoteRelays<'a> {
+        let Some(note_key) = self.key() else {
+            return NoteRelays::empty();
+        };
+
+        NoteRelays::new(txn, note_key)
     }
 
     pub fn key(&self) -> Option<NoteKey> {
