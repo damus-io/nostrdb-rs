@@ -95,8 +95,8 @@ impl bindings::ndb_filter {
     }
 }
 
-impl Default for bindings::ndb_filter {
-    fn default() -> Self {
+impl bindings::ndb_filter {
+    fn new(pages: i32) -> Self {
         let null = null_mut();
         let mut filter_data = bindings::ndb_filter {
             finalized: 0,
@@ -116,7 +116,7 @@ impl Default for bindings::ndb_filter {
         };
 
         unsafe {
-            bindings::ndb_filter_init(filter_data.as_mut_ptr());
+            bindings::ndb_filter_init_with(filter_data.as_mut_ptr(), pages);
         };
 
         filter_data
@@ -124,11 +124,15 @@ impl Default for bindings::ndb_filter {
 }
 
 impl Filter {
+    pub fn new_with_capacity(pages: i32) -> FilterBuilder {
+        FilterBuilder {
+            data: bindings::ndb_filter::new(pages),
+        }
+    }
+
     #[allow(clippy::new_ret_no_self)]
     pub fn new() -> FilterBuilder {
-        FilterBuilder {
-            data: Default::default(),
-        }
+        Self::new_with_capacity(256)
     }
 
     pub fn copy_from<'a, I>(filter: I) -> FilterBuilder
@@ -315,9 +319,7 @@ impl Default for FilterBuilder {
 
 impl FilterBuilder {
     pub fn new() -> FilterBuilder {
-        Self {
-            data: Default::default(),
-        }
+        Self::default()
     }
 
     pub fn to_ref(&self) -> &bindings::ndb_filter {
