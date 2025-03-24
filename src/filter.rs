@@ -313,7 +313,9 @@ impl Filter {
 
 impl Default for FilterBuilder {
     fn default() -> Self {
-        FilterBuilder::new()
+        FilterBuilder {
+            data: bindings::ndb_filter::new(256),
+        }
     }
 }
 
