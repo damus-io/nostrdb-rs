@@ -33,7 +33,7 @@ impl Clone for Filter {
             },
             num_elements: 0,
             current: -1,
-            elements: [0, 0, 0, 0, 0, 0, 0],
+            elements: [0; 10],
         };
 
         debug!("cloning filter");
@@ -112,7 +112,7 @@ impl bindings::ndb_filter {
             },
             num_elements: 0,
             current: -1,
-            elements: [0, 0, 0, 0, 0, 0, 0],
+            elements: [0; 10],
         };
 
         unsafe {
