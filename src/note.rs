@@ -55,6 +55,10 @@ pub enum Note<'a> {
         size: usize,
     },
 
+    /// An note owned somewhere else. We don't know if its from the DB or not. This
+    /// is used for custom filter callbacks.
+    Unowned { ptr: &'a bindings::ndb_note },
+
     /// A note inside of nostrdb. Tied to the lifetime of a
     /// [Transaction] to ensure no reading of data outside
     /// of a transaction.
@@ -73,6 +77,8 @@ impl Clone for Note<'_> {
         // and when. Owned notes are a bit more expensive to clone, so
         // it would be better if API encoded that explicitly.
         match self {
+            Note::Unowned { ptr } => Note::Unowned { ptr },
+
             Note::Owned { ptr, size } => {
                 // Allocate memory for the cloned note
                 let new_ptr = unsafe { libc::malloc(*size) as *mut bindings::ndb_note };
@@ -172,6 +178,7 @@ impl<'a> Note<'a> {
     pub fn size(&self) -> usize {
         match self {
             Note::Owned { size, .. } => *size,
+            Note::Unowned { .. } => 0,
             Note::Transactional { size, .. } => *size,
         }
     }
@@ -180,6 +187,7 @@ impl<'a> Note<'a> {
     pub fn as_ptr(&self) -> *mut bindings::ndb_note {
         match self {
             Note::Owned { ptr, .. } => *ptr,
+            Note::Unowned { ptr } => *ptr as *const bindings::ndb_note as *mut bindings::ndb_note,
             Note::Transactional { ptr, .. } => *ptr,
         }
     }
