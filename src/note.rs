@@ -128,6 +128,11 @@ impl<'a> Note<'a> {
         Note::Owned { ptr, size }
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn new_unowned(ptr: &'a bindings::ndb_note) -> Note<'a> {
+        Note::Unowned { ptr }
+    }
+
     /// Constructs a `Note` in a transactional context.
     /// Use [Note::new_transactional] to create a new transactional note.
     /// You normally wouldn't use this method directly, it is used by

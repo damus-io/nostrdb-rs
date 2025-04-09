@@ -1,17 +1,51 @@
 use crate::{bindings, Error, FilterError, Note, Result};
 use std::ffi::CString;
+use std::fmt;
 use std::os::raw::c_char;
 use std::ptr::null_mut;
 use tracing::debug;
 
-#[derive(Debug)]
 pub struct FilterBuilder {
     pub data: bindings::ndb_filter,
 }
 
-#[derive(Debug)]
 pub struct Filter {
     pub data: bindings::ndb_filter,
+}
+
+fn filter_fmt<'a, F>(filter: F, f: &mut fmt::Formatter<'_>) -> fmt::Result
+where
+    F: IntoIterator<Item = FilterField<'a>>,
+{
+    let mut dfmt = f.debug_struct("Filter");
+    let mut fmt = &mut dfmt;
+
+    for field in filter {
+        fmt = match field {
+            FilterField::Search(ref search) => fmt.field("search", search),
+            FilterField::Ids(ref ids) => fmt.field("ids", ids),
+            FilterField::Authors(ref authors) => fmt.field("authors", authors),
+            FilterField::Kinds(ref kinds) => fmt.field("kinds", kinds),
+            FilterField::Tags(ref chr, _tags) => fmt.field("tags", chr),
+            FilterField::Since(ref n) => fmt.field("since", n),
+            FilterField::Until(ref n) => fmt.field("until", n),
+            FilterField::Limit(ref n) => fmt.field("limit", n),
+        }
+    }
+
+    fmt.finish()
+}
+
+impl fmt::Debug for Filter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        filter_fmt(self, f)
+    }
+}
+
+impl fmt::Debug for FilterBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        filter_fmt(self, f)
+    }
 }
 
 impl Clone for Filter {
@@ -360,6 +394,34 @@ impl FilterBuilder {
         Ok(())
     }
 
+    /// Set a callback to add custom filtering logic to the query
+    pub fn add_custom_filter_element<F>(&mut self, closure: F) -> Result<()>
+    where
+        F: FnMut(Note<'_>) -> bool,
+    {
+        // Box the closure to ensure it has a stable address.
+        let boxed_closure: Box<dyn FnMut(Note<'_>) -> bool> = Box::new(closure);
+
+        // Convert it to a raw pointer to store in sub_cb_ctx.
+        // FIXME: THIS LEAKS! we need some way to clean this up after the filter
+        // is destroyed.
+        let ctx_ptr = Box::into_raw(Box::new(boxed_closure)) as *mut ::std::os::raw::c_void;
+
+        let r = unsafe {
+            bindings::ndb_filter_add_custom_filter_element(
+                self.as_mut_ptr(),
+                Some(custom_filter_trampoline),
+                ctx_ptr,
+            )
+        };
+
+        if r == 0 {
+            return Err(FilterError::already_exists());
+        }
+
+        Ok(())
+    }
+
     pub fn add_id_element(&mut self, id: &[u8; 32]) -> Result<()> {
         let ptr: *const ::std::os::raw::c_uchar = id.as_ptr() as *const ::std::os::raw::c_uchar;
         let r = unsafe { bindings::ndb_filter_add_id_element(self.as_mut_ptr(), ptr) };
@@ -400,6 +462,10 @@ impl FilterBuilder {
 
     pub fn start_since_field(&mut self) -> Result<()> {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_SINCE)
+    }
+
+    pub fn start_custom_field(&mut self) -> Result<()> {
+        self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_CUSTOM)
     }
 
     pub fn start_until_field(&mut self) -> Result<()> {
@@ -536,6 +602,16 @@ impl FilterBuilder {
         for tag in tags {
             self.add_str_element(tag).unwrap();
         }
+        self.end_field();
+        self
+    }
+
+    pub fn custom<F>(mut self, filter: F) -> Self
+    where
+        F: FnMut(Note<'_>) -> bool,
+    {
+        self.start_custom_field().unwrap();
+        self.add_custom_filter_element(filter).unwrap();
         self.end_field();
         self
     }
@@ -1131,6 +1207,21 @@ impl<'a> FilterElemIter<'a> {
     }
 }
 
+extern "C" fn custom_filter_trampoline(
+    ctx: *mut ::std::os::raw::c_void,
+    note: *mut bindings::ndb_note,
+) -> bool {
+    unsafe {
+        // Convert the raw pointer back into a reference to our closure.
+        // We know this pointer was created by Box::into_raw in `set_sub_callback_rust`.
+        let closure_ptr = ctx as *mut Box<dyn FnMut(Note<'_>) -> bool>;
+        assert!(!closure_ptr.is_null());
+        let closure = &mut *closure_ptr;
+        let note = Note::new_unowned(&*note);
+        closure(note)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1252,5 +1343,53 @@ mod tests {
             }
         }
         assert!(hit == 2);
+    }
+
+    #[test]
+    fn custom_filter_works() {
+        use crate::NoteBuilder;
+
+        let seckey: [u8; 32] = [
+            0xfb, 0x16, 0x5b, 0xe2, 0x2c, 0x7b, 0x25, 0x18, 0xb7, 0x49, 0xaa, 0xbb, 0x71, 0x40,
+            0xc7, 0x3f, 0x08, 0x87, 0xfe, 0x84, 0x47, 0x5c, 0x82, 0x78, 0x57, 0x00, 0x66, 0x3b,
+            0xe8, 0x5b, 0xa8, 0x59,
+        ];
+
+        let note = NoteBuilder::new()
+            .kind(1)
+            .content("this is the content")
+            .created_at(42)
+            .start_tag()
+            .tag_str("comment")
+            .tag_str("this is a comment")
+            .start_tag()
+            .tag_str("blah")
+            .tag_str("something")
+            .sign(&seckey)
+            .build()
+            .expect("expected build to work");
+
+        {
+            let filter = Filter::new().custom(|n| n.created_at() == 43).build();
+            assert!(!filter.matches(&note));
+        }
+
+        {
+            let filter = Filter::new().custom(|n| n.created_at() == 42).build();
+            assert!(filter.matches(&note));
+        }
+
+        {
+            let filter = Filter::new()
+                .custom(|n| {
+                    n.tags()
+                        .into_iter()
+                        .next()
+                        .and_then(|t| t.get_str(1))
+                        .map_or(false, |s| s == "this is a comment")
+                })
+                .build();
+            assert!(filter.matches(&note));
+        }
     }
 }
