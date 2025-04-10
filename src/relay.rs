@@ -101,7 +101,6 @@ impl Drop for NoteRelays<'_> {
 mod tests {
     use super::*;
     use crate::{config::Config, test_util, IngestMetadata, Ndb};
-    use tokio::time::{self, sleep, Duration};
 
     #[test]
     fn process_event_relays_works() {
@@ -126,7 +125,7 @@ mod tests {
             let id =
                 hex::decode("702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3")
                     .expect("hex id");
-            let mut txn = Transaction::new(&ndb).expect("txn");
+            let txn = Transaction::new(&ndb).expect("txn");
             let id_bytes: [u8; 32] = id.try_into().expect("id bytes");
             let note = ndb.get_note_by_id(&txn, &id_bytes).expect("note");
 

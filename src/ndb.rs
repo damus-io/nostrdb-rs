@@ -148,9 +148,6 @@ impl Ndb {
     /// Ingest a relay-sent event in the form `["EVENT","subid", {"id:"...}]`
     /// This function returns immediately and doesn't provide any information on
     /// if ingestion was successful or not.
-    #[deprecated(
-        note = "Use `process_event_with` with IngestMetadata::new().client(false).relay(...)"
-    )]
     pub fn process_event(&self, json: &str) -> Result<()> {
         self.process_event_with(json, IngestMetadata::new().client(false))
     }
@@ -158,9 +155,6 @@ impl Ndb {
     /// Ingest a client-sent event in the form `["EVENT", {"id:"...}]`
     /// This function returns immediately and doesn't provide any information on
     /// if ingestion was successful or not.
-    #[deprecated(
-        note = "Use `process_event_with` with IngestMetadata::new().client(true).relay(...)"
-    )]
     pub fn process_client_event(&self, json: &str) -> Result<()> {
         self.process_event_with(json, IngestMetadata::new().client(true))
     }

@@ -55,6 +55,10 @@ pub enum Note<'a> {
         size: usize,
     },
 
+    /// An note owned somewhere else. We don't know if its from the DB or not. This
+    /// is used for custom filter callbacks.
+    Unowned { ptr: &'a bindings::ndb_note },
+
     /// A note inside of nostrdb. Tied to the lifetime of a
     /// [Transaction] to ensure no reading of data outside
     /// of a transaction.
@@ -73,6 +77,8 @@ impl Clone for Note<'_> {
         // and when. Owned notes are a bit more expensive to clone, so
         // it would be better if API encoded that explicitly.
         match self {
+            Note::Unowned { ptr } => Note::Unowned { ptr },
+
             Note::Owned { ptr, size } => {
                 // Allocate memory for the cloned note
                 let new_ptr = unsafe { libc::malloc(*size) as *mut bindings::ndb_note };
@@ -122,6 +128,11 @@ impl<'a> Note<'a> {
         Note::Owned { ptr, size }
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn new_unowned(ptr: &'a bindings::ndb_note) -> Note<'a> {
+        Note::Unowned { ptr }
+    }
+
     /// Constructs a `Note` in a transactional context.
     /// Use [Note::new_transactional] to create a new transactional note.
     /// You normally wouldn't use this method directly, it is used by
@@ -141,6 +152,7 @@ impl<'a> Note<'a> {
         }
     }
 
+    #[inline]
     pub fn txn(&'a self) -> Option<&'a Transaction> {
         match self {
             Note::Transactional { transaction, .. } => Some(transaction),
@@ -150,6 +162,7 @@ impl<'a> Note<'a> {
 
     /// Returns a database cursor that iterates over all of the relays
     /// that the note has been seen on
+    #[inline]
     pub fn relays(&self, txn: &'a Transaction) -> NoteRelays<'a> {
         let Some(note_key) = self.key() else {
             return NoteRelays::empty();
@@ -158,6 +171,7 @@ impl<'a> Note<'a> {
         NoteRelays::new(txn, note_key)
     }
 
+    #[inline]
     pub fn key(&self) -> Option<NoteKey> {
         match self {
             Note::Transactional { key, .. } => Some(NoteKey::new(key.as_u64())),
@@ -165,20 +179,25 @@ impl<'a> Note<'a> {
         }
     }
 
+    #[inline]
     pub fn size(&self) -> usize {
         match self {
             Note::Owned { size, .. } => *size,
+            Note::Unowned { .. } => 0,
             Note::Transactional { size, .. } => *size,
         }
     }
 
+    #[inline]
     pub fn as_ptr(&self) -> *mut bindings::ndb_note {
         match self {
             Note::Owned { ptr, .. } => *ptr,
+            Note::Unowned { ptr } => *ptr as *const bindings::ndb_note as *mut bindings::ndb_note,
             Note::Transactional { ptr, .. } => *ptr,
         }
     }
 
+    #[inline]
     pub fn json_with_bufsize(&self, bufsize: usize) -> Result<String, Error> {
         let mut buf = Vec::with_capacity(bufsize);
         unsafe {
@@ -199,24 +218,29 @@ impl<'a> Note<'a> {
         }
     }
 
+    #[inline]
     pub fn json(&self) -> Result<String, Error> {
         // 1mb buffer
         self.json_with_bufsize(1024usize * 1024usize)
     }
 
+    #[inline]
     fn content_size(&self) -> usize {
         unsafe { bindings::ndb_note_content_length(self.as_ptr()) as usize }
     }
 
+    #[inline]
     pub fn created_at(&self) -> u64 {
         unsafe { bindings::ndb_note_created_at(self.as_ptr()).into() }
     }
 
+    #[inline]
     pub fn content_ptr(&self) -> *const ::std::os::raw::c_char {
         unsafe { bindings::ndb_note_content(self.as_ptr()) }
     }
 
     /// Get the [`Note`] contents.
+    #[inline]
     pub fn content(&self) -> &'a str {
         unsafe {
             let content = self.content_ptr();
@@ -226,6 +250,7 @@ impl<'a> Note<'a> {
     }
 
     /// Get the note pubkey
+    #[inline]
     pub fn pubkey(&self) -> &'a [u8; 32] {
         unsafe {
             let ptr = bindings::ndb_note_pubkey(self.as_ptr());
@@ -233,6 +258,7 @@ impl<'a> Note<'a> {
         }
     }
 
+    #[inline]
     pub fn id(&self) -> &'a [u8; 32] {
         unsafe {
             let ptr = bindings::ndb_note_id(self.as_ptr());
@@ -240,15 +266,18 @@ impl<'a> Note<'a> {
         }
     }
 
+    #[inline]
     pub fn kind(&self) -> u32 {
         unsafe { bindings::ndb_note_kind(self.as_ptr()) }
     }
 
+    #[inline]
     pub fn tags(&self) -> Tags<'a> {
         let tags = unsafe { bindings::ndb_note_tags(self.as_ptr()) };
         Tags::new(tags, self.clone())
     }
 
+    #[inline]
     pub fn sig(&self) -> &'a [u8; 64] {
         unsafe {
             let ptr = bindings::ndb_note_sig(self.as_ptr());
