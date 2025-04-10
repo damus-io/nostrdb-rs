@@ -217,6 +217,9 @@ pub const SCNxFAST32: &[u8; 2] = b"x\0";
 pub const SCNxFAST64: &[u8; 4] = b"llx\0";
 pub const SCNxMAX: &[u8; 4] = b"llx\0";
 pub const SCNxPTR: &[u8; 4] = b"llx\0";
+pub const __bool_true_false_are_defined: u32 = 1;
+pub const false_: u32 = 0;
+pub const true_: u32 = 1;
 pub const CCAN_COMPILER: &[u8; 3] = b"cc\0";
 pub const CCAN_CFLAGS : & [u8 ; 111] = b"-g3 -ggdb -Wall -Wundef -Wmissing-prototypes -Wmissing-declarations -Wstrict-prototypes -Wold-style-definition\0" ;
 pub const CCAN_OUTPUT_EXE_CFLAG: &[u8; 3] = b"-o\0";
@@ -227,9 +230,6 @@ pub const HAVE_BIG_ENDIAN: u32 = 0;
 pub const HAVE_BYTESWAP_H: u32 = 0;
 pub const HAVE_BSWAP_64: u32 = 0;
 pub const HAVE_LITTLE_ENDIAN: u32 = 1;
-pub const __bool_true_false_are_defined: u32 = 1;
-pub const false_: u32 = 0;
-pub const true_: u32 = 1;
 pub const _CRT_INTERNAL_STDIO_SYMBOL_PREFIX: &[u8; 1] = b"\0";
 pub const _CRT_INTERNAL_PRINTF_LEGACY_VSPRINTF_NULL_TERMINATION: u32 = 1;
 pub const _CRT_INTERNAL_PRINTF_STANDARD_SNPRINTF_BEHAVIOR: u32 = 2;
@@ -358,7 +358,7 @@ pub const NDB_FLAG_SKIP_NOTE_VERIFY: u32 = 2;
 pub const NDB_FLAG_NO_FULLTEXT: u32 = 4;
 pub const NDB_FLAG_NO_NOTE_BLOCKS: u32 = 8;
 pub const NDB_FLAG_NO_STATS: u32 = 16;
-pub const NDB_NUM_FILTERS: u32 = 7;
+pub const NDB_NUM_FILTERS: u32 = 10;
 pub const MAX_TEXT_SEARCH_RESULTS: u32 = 128;
 pub const MAX_TEXT_SEARCH_WORDS: u32 = 8;
 pub const NDB_NUM_BLOCK_TYPES: u32 = 6;
@@ -3307,11 +3307,14 @@ pub const ndb_filter_fieldtype_NDB_FILTER_SINCE: ndb_filter_fieldtype = 5;
 pub const ndb_filter_fieldtype_NDB_FILTER_UNTIL: ndb_filter_fieldtype = 6;
 pub const ndb_filter_fieldtype_NDB_FILTER_LIMIT: ndb_filter_fieldtype = 7;
 pub const ndb_filter_fieldtype_NDB_FILTER_SEARCH: ndb_filter_fieldtype = 8;
+pub const ndb_filter_fieldtype_NDB_FILTER_RELAYS: ndb_filter_fieldtype = 9;
+pub const ndb_filter_fieldtype_NDB_FILTER_CUSTOM: ndb_filter_fieldtype = 10;
 pub type ndb_filter_fieldtype = ::std::os::raw::c_int;
 pub const ndb_generic_element_type_NDB_ELEMENT_UNKNOWN: ndb_generic_element_type = 0;
 pub const ndb_generic_element_type_NDB_ELEMENT_STRING: ndb_generic_element_type = 1;
 pub const ndb_generic_element_type_NDB_ELEMENT_ID: ndb_generic_element_type = 2;
 pub const ndb_generic_element_type_NDB_ELEMENT_INT: ndb_generic_element_type = 3;
+pub const ndb_generic_element_type_NDB_ELEMENT_CUSTOM: ndb_generic_element_type = 4;
 pub type ndb_generic_element_type = ::std::os::raw::c_int;
 pub const ndb_search_order_NDB_ORDER_DESCENDING: ndb_search_order = 0;
 pub const ndb_search_order_NDB_ORDER_ASCENDING: ndb_search_order = 1;
@@ -3593,12 +3596,57 @@ fn bindgen_test_layout_ndb_filter_string() {
         )
     );
 }
+pub type ndb_filter_callback_fn = ::std::option::Option<
+    unsafe extern "C" fn(arg1: *mut ::std::os::raw::c_void, arg2: *mut ndb_note) -> bool,
+>;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_filter_custom {
+    pub ctx: *mut ::std::os::raw::c_void,
+    pub cb: ndb_filter_callback_fn,
+}
+#[test]
+fn bindgen_test_layout_ndb_filter_custom() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_filter_custom> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_filter_custom>(),
+        16usize,
+        concat!("Size of: ", stringify!(ndb_filter_custom))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_filter_custom>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_filter_custom))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).ctx) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_filter_custom),
+            "::",
+            stringify!(ctx)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).cb) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_filter_custom),
+            "::",
+            stringify!(cb)
+        )
+    );
+}
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub union ndb_filter_element {
     pub string: ndb_filter_string,
     pub id: *const ::std::os::raw::c_uchar,
     pub integer: u64,
+    pub custom_filter: ndb_filter_custom,
 }
 #[test]
 fn bindgen_test_layout_ndb_filter_element() {
@@ -3642,6 +3690,16 @@ fn bindgen_test_layout_ndb_filter_element() {
             stringify!(ndb_filter_element),
             "::",
             stringify!(integer)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).custom_filter) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_filter_element),
+            "::",
+            stringify!(custom_filter)
         )
     );
 }
@@ -3757,7 +3815,7 @@ pub struct ndb_filter {
     pub num_elements: ::std::os::raw::c_int,
     pub finalized: ::std::os::raw::c_int,
     pub current: ::std::os::raw::c_int,
-    pub elements: [::std::os::raw::c_int; 7usize],
+    pub elements: [::std::os::raw::c_int; 10usize],
 }
 #[test]
 fn bindgen_test_layout_ndb_filter() {
@@ -3765,7 +3823,7 @@ fn bindgen_test_layout_ndb_filter() {
     let ptr = UNINIT.as_ptr();
     assert_eq!(
         ::std::mem::size_of::<ndb_filter>(),
-        88usize,
+        104usize,
         concat!("Size of: ", stringify!(ndb_filter))
     );
     assert_eq!(
@@ -5451,6 +5509,13 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
+    pub fn ndb_filter_add_custom_filter_element(
+        filter: *mut ndb_filter,
+        cb: ndb_filter_callback_fn,
+        ctx: *mut ::std::os::raw::c_void,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
     pub fn ndb_filter_eq(arg1: *const ndb_filter, arg2: *const ndb_filter)
         -> ::std::os::raw::c_int;
 }
@@ -5519,6 +5584,13 @@ extern "C" {
 }
 extern "C" {
     pub fn ndb_filter_matches(arg1: *mut ndb_filter, arg2: *mut ndb_note) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_filter_matches_with_relay(
+        arg1: *mut ndb_filter,
+        arg2: *mut ndb_note,
+        iter: *mut ndb_note_relay_iterator,
+    ) -> ::std::os::raw::c_int;
 }
 extern "C" {
     pub fn ndb_filter_clone(dst: *mut ndb_filter, src: *mut ndb_filter) -> ::std::os::raw::c_int;
