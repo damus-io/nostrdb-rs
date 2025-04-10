@@ -191,6 +191,9 @@ impl Filter {
                             FilterElement::Id(id) => builder.add_id_element(id).unwrap(),
                             FilterElement::Str(str_) => builder.add_str_element(str_).unwrap(),
                             FilterElement::Int(int) => builder.add_int_element(int).unwrap(),
+                            FilterElement::Custom => {
+                                todo!("copy filters with custom filters");
+                            }
                         }
                     }
                     builder.end_field();
@@ -972,6 +975,11 @@ impl<'a> FilterElements<'a> {
                 let num = unsafe { bindings::ndb_filter_get_int_element(self.elements, index) };
                 Some(FilterElement::Int(num))
             }
+
+            FieldElemType::Custom => {
+                //let custom = unsafe { bindings::ndb_filter_get_custom_filter_element() }
+                Some(FilterElement::Custom)
+            }
         }
     }
 
@@ -1020,6 +1028,7 @@ pub enum FieldElemType {
     Str,
     Id,
     Int,
+    Custom,
 }
 
 impl FieldElemType {
@@ -1032,6 +1041,8 @@ impl FieldElemType {
             Some(FieldElemType::Id)
         } else if val == bindings::ndb_generic_element_type_NDB_ELEMENT_INT {
             Some(FieldElemType::Int)
+        } else if val == bindings::ndb_generic_element_type_NDB_ELEMENT_CUSTOM {
+            Some(FieldElemType::Custom)
         } else {
             None
         }
@@ -1085,6 +1096,7 @@ pub enum FilterElement<'a> {
     Str(&'a str),
     Id(&'a [u8; 32]),
     Int(u64),
+    Custom,
 }
 
 impl<'a> Iterator for FilterIter<'a> {
