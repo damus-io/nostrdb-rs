@@ -2,15 +2,19 @@ use crate::{bindings, Error, FilterError, Note, Result};
 use std::ffi::CString;
 use std::fmt;
 use std::os::raw::c_char;
+use std::os::raw::c_void;
 use std::ptr::null_mut;
+use std::sync::Arc;
 use tracing::debug;
 
 pub struct FilterBuilder {
     pub data: bindings::ndb_filter,
+    pub custom_ctx: Option<*mut c_void>,
 }
 
 pub struct Filter {
     pub data: bindings::ndb_filter,
+    pub custom_ctx: Option<Arc<*mut c_void>>,
 }
 
 fn filter_fmt<'a, F>(filter: F, f: &mut fmt::Formatter<'_>) -> fmt::Result
@@ -77,7 +81,10 @@ impl Clone for Filter {
                 self.as_ptr() as *mut bindings::ndb_filter,
             );
         };
-        Filter { data: new_filter }
+        Filter {
+            data: new_filter,
+            custom_ctx: self.custom_ctx.clone(),
+        }
     }
 }
 
@@ -161,6 +168,7 @@ impl Filter {
     pub fn new_with_capacity(pages: i32) -> FilterBuilder {
         FilterBuilder {
             data: bindings::ndb_filter::new(pages),
+            custom_ctx: None,
         }
     }
 
@@ -228,7 +236,10 @@ impl Filter {
                 return Err(Error::BufferOverflow); // Handle the error appropriately
             }
 
-            Ok(Filter { data: filter.data })
+            Ok(Filter {
+                data: filter.data,
+                custom_ctx: None,
+            })
         }
     }
 
@@ -352,6 +363,7 @@ impl Default for FilterBuilder {
     fn default() -> Self {
         FilterBuilder {
             data: bindings::ndb_filter::new(256),
+            custom_ctx: None,
         }
     }
 }
@@ -409,6 +421,7 @@ impl FilterBuilder {
         // FIXME: THIS LEAKS! we need some way to clean this up after the filter
         // is destroyed.
         let ctx_ptr = Box::into_raw(Box::new(boxed_closure)) as *mut ::std::os::raw::c_void;
+        self.custom_ctx = Some(ctx_ptr);
 
         let r = unsafe {
             bindings::ndb_filter_add_custom_filter_element(
@@ -665,7 +678,13 @@ impl FilterBuilder {
         unsafe {
             bindings::ndb_filter_end(self.as_mut_ptr());
         };
-        Filter { data: self.data }
+
+        let custom_ctx = self.custom_ctx.map(Arc::new);
+
+        Filter {
+            data: self.data,
+            custom_ctx,
+        }
     }
 }
 
@@ -673,6 +692,20 @@ impl Drop for Filter {
     fn drop(&mut self) {
         debug!("dropping filter {:?}", self);
         unsafe { bindings::ndb_filter_destroy(self.as_mut_ptr()) };
+
+        if let Some(ptr_arc) = &self.custom_ctx {
+            // Only drop the actual Box if this is the last Arc
+            let count = Arc::strong_count(ptr_arc);
+            if count == 1 {
+                let raw = **ptr_arc as *mut Box<dyn FnMut(Note) -> bool>;
+                tracing::trace!("dropping custom filter closure context");
+                unsafe {
+                    drop(Box::from_raw(raw));
+                }
+            } else {
+                tracing::trace!("NOT dropping custom filter closure context, {count} instances");
+            }
+        }
     }
 }
 
@@ -1388,6 +1421,8 @@ mod tests {
 
         {
             let filter = Filter::new().custom(|n| n.created_at() == 42).build();
+            // test Arc
+            let _filter2 = filter.clone();
             assert!(filter.matches(&note));
         }
 
