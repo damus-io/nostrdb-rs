@@ -104,6 +104,10 @@ fn main() {
         build.flag("-O1");
     }
 
+    if env::var("NDB_LOG").is_ok() {
+        build.flag("-DNDB_LOG");
+    }
+
     // Print out the path to the compiled library
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     println!("cargo:rustc-link-search=native={}", out_path.display());
