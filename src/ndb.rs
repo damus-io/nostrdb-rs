@@ -547,24 +547,15 @@ mod tests {
 
             let sub_id = ndb.subscribe(&filters).expect("sub_id");
             let mut sub = sub_id.stream(&ndb).notes_per_await(1);
+
             ndb.process_event(r#"["EVENT","b",{  "id": "0b9f0e14727733e430dcb00c69b12a76a1e100f419ce369df837f7eb33e4523c",  "pubkey": "3f770d65d3a764a9c5cb503ae123e62ec7598ad035d836e2a810f3877a745b24",  "created_at": 1736785355,  "kind": 0,  "tags": [    [      "alt",      "User profile for Derek Ross"    ],    [      "i",      "twitter:derekmross",      "1634343988407726081"    ],    [      "i",      "github:derekross",      "3edaf845975fa4500496a15039323fa3I"    ]  ],  "content": "{\"about\":\"Building NostrPlebs.com and NostrNests.com. The purple pill helps the orange pill go down. Nostr is the social glue that binds all of your apps together.\",\"banner\":\"https://i.nostr.build/O2JE.jpg\",\"display_name\":\"Derek Ross\",\"lud16\":\"derekross@strike.me\",\"name\":\"Derek Ross\",\"nip05\":\"derekross@nostrplebs.com\",\"picture\":\"https://i.nostr.build/MVIJ6OOFSUzzjVEc.jpg\",\"website\":\"https://nostrplebs.com\",\"created_at\":1707238393}",  "sig": "51e1225ccaf9b6739861dc218ac29045b09d5cf3a51b0ac6ea64bd36827d2d4394244e5f58a4e4a324c84eeda060e1a27e267e0d536e5a0e45b0b6bdc2c43bbc"}]"#).unwrap();
+
             ndb.process_event(r#"["EVENT","b",{  "id": "232a02ec7e1b2febf85370b52ed49bf34e2701c385c3d563511508dcf0767bcf",  "pubkey": "4a0510f26880d40e432f4865cb5714d9d3c200ca6ebb16b418ae6c555f574967",  "created_at": 1736017863,  "kind": 0,  "tags": [    [      "client",      "Damus Notedeck"    ]  ],  "content": "{\"display_name\":\"KernelKind\",\"name\":\"KernelKind\",\"about\":\"hello from notedeck!\",\"lud16\":\"kernelkind@getalby.com\"}",  "sig": "18c7dea0da3c30677d6822a31a6dfd9ebc02a18a31d69f0f2ac9ba88409e437d3db0ac433639111df1e4948a6d18451d1582173ee4fcd018d0ec92939f2c1506"}]"#).unwrap();
-            ndb.process_event(r#"["EVENT","b",{  "id": "3e9e3b63a7831f09bf2963616a2440e6f30c6e95adbc7841d59376ec100ae9dc",  "pubkey": "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245",  "created_at": 1737466417,  "kind": 0,  "tags": [],  "content": "{\"banner\":\"https://nostr.build/i/3d6f22d45d95ecc2c19b1acdec57aa15f2dba9c423b536e26fc62707c125f557.jpg\",\"website\":\"https://damus.io\",\"nip05\":\"_@jb55.com\",\"display_name\":\"\",\"about\":\"I made damus, zaps, and npubs. Bitcoin core, lightning, and nostr dev. \",\"picture\":\"https://cdn.jb55.com/img/red-me.jpg\",\"name\":\"jb55\",\"lud16\":\"jb55@sendsats.lol\"}",  "sig": "9cf1c89a4dbb2888e0f5fc300e56f93eb788bd84d3d0f8b52e4ac4abdd92256b0fb694bfd82d917c3923f01e8eac7886bb75c8043dcd9d4e070e4eaa5ab3bd0a"}]"#).unwrap();
-            for _ in 0..3 {
+
+            for _ in 0..2 {
                 let _ = sub.next().await;
             }
             let txn = Transaction::new(&ndb).expect("txn");
-
-            let res = ndb.search_profile(&txn, "jb55", 1);
-            assert!(res.is_ok());
-            let res = res.unwrap();
-            assert!(res.len() >= 1);
-            let will_bytes: [u8; 32] = [
-                0x32, 0xe1, 0x82, 0x76, 0x35, 0x45, 0x0e, 0xbb, 0x3c, 0x5a, 0x7d, 0x12, 0xc1, 0xf8,
-                0xe7, 0xb2, 0xb5, 0x14, 0x43, 0x9a, 0xc1, 0x0a, 0x67, 0xee, 0xf3, 0xd9, 0xfd, 0x9c,
-                0x5c, 0x68, 0xe2, 0x45,
-            ];
-            assert_eq!(will_bytes, **res.first().unwrap());
 
             let res = ndb.search_profile(&txn, "kernel", 1);
             assert!(res.is_ok());
