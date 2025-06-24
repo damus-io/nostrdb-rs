@@ -128,6 +128,10 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=Security");
     }
 
+    // windows needs advapi32 due to a call in mdb_env_setup_locks
+    #[cfg(target_os = "windows")]
+    println!("cargo:rustc-link-lib=advapi32");
+
     //
     // We only need bindgen when we update the bindings.
     // I don't want to complicate the build with it.
