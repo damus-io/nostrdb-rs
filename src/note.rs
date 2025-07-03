@@ -461,6 +461,20 @@ impl<'a> NoteBuilder<'a> {
         self
     }
 
+    /// Push a packed 32-byte id. tag_str also does this for you,
+    /// but we expose a method here so that you don't have to
+    /// hex encode an id if you already have one
+    pub fn tag_id(mut self, id: &[u8; 32]) -> Self {
+        unsafe {
+            // Call the external C function with the appropriate arguments
+            bindings::ndb_builder_push_tag_id(
+                self.as_mut_ptr(),
+                id.as_ptr() as *mut ::std::os::raw::c_uchar,
+            );
+        }
+        self
+    }
+
     pub fn options(mut self, options: NoteBuildOptions<'a>) -> NoteBuilder<'a> {
         self.options = options;
         self
