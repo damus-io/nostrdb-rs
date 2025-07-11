@@ -5230,6 +5230,7 @@ extern "C" {
         note: *mut ndb_note,
         buf: *mut ::std::os::raw::c_uchar,
         buflen: ::std::os::raw::c_int,
+        id: *mut ::std::os::raw::c_uchar,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
@@ -5251,9 +5252,9 @@ extern "C" {
 extern "C" {
     pub fn ndb_note_verify(
         secp_ctx: *mut ::std::os::raw::c_void,
-        pubkey: *mut ::std::os::raw::c_uchar,
-        id: *mut ::std::os::raw::c_uchar,
-        signature: *mut ::std::os::raw::c_uchar,
+        scratch: *mut ::std::os::raw::c_uchar,
+        scratch_size: usize,
+        note: *mut ndb_note,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
@@ -5480,6 +5481,12 @@ extern "C" {
         builder: *mut ndb_builder,
         str_: *const ::std::os::raw::c_char,
         len: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_builder_push_tag_id(
+        builder: *mut ndb_builder,
+        id: *mut ::std::os::raw::c_uchar,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
