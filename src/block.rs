@@ -207,7 +207,7 @@ impl<'a> Block<'a> {
             4 => BlockType::MentionBech32,
             5 => BlockType::Url,
             6 => BlockType::Invoice,
-            _ => panic!("Invalid blocktype {}", typ),
+            _ => panic!("Invalid blocktype {typ}"),
         }
     }
 }

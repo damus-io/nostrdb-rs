@@ -120,7 +120,7 @@ fn main() {
 
     // Re-run the build script if any of the C files or headers change
     for file in &["nostrdb/src/nostrdb.c", "nostrdb/src/nostrdb.h"] {
-        println!("cargo:rerun-if-changed={}", file);
+        println!("cargo:rerun-if-changed={file}");
     }
 
     // Link Security framework on macOS
