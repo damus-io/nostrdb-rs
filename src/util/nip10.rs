@@ -187,9 +187,7 @@ fn tags_to_note_reply<'a>(tags: Tags<'a>) -> NoteReply<'a> {
             break;
         }
 
-        let note_ref = if let Ok(note_ref) = tag_to_noteid_ref(tag, index as u16) {
-            note_ref
-        } else {
+        let Ok(note_ref) = tag_to_noteid_ref(tag, index as u16) else {
             continue;
         };
 
@@ -220,25 +218,13 @@ pub fn tag_to_noteid_ref(tag: Tag<'_>, index: u16) -> Result<NoteIdRef<'_>, Erro
         return Err(Error::DecodeError);
     }
 
-    if tag.get_unchecked(0).variant().str() != Some("e") {
+    if tag.get_str(0) != Some("e") {
         return Err(Error::DecodeError);
     }
 
-    let id = tag
-        .get_unchecked(1)
-        .variant()
-        .id()
-        .ok_or(Error::DecodeError)?;
-
-    let relay = tag
-        .get(2)
-        .and_then(|t| t.variant().str())
-        .filter(|x| !x.is_empty());
-
-    let marker = tag
-        .get(3)
-        .and_then(|t| t.variant().str())
-        .and_then(Marker::new);
+    let id = tag.get_id(1).ok_or(Error::DecodeError)?;
+    let relay = tag.get_str(2).filter(|x| !x.is_empty());
+    let marker = tag.get_str(3).and_then(Marker::new);
 
     Ok(NoteIdRef {
         index,
