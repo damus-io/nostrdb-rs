@@ -132,7 +132,11 @@ impl<'a> NoteReply<'a> {
     }
 
     pub fn is_reply_to_root(&self) -> bool {
-        self.root.is_some() && self.reply.is_none()
+        match (&self.root, &self.reply) {
+            (Some(_root), None) => true,
+            (Some(root), Some(reply)) if root.id == reply.id => true,
+            _ => false,
+        }
     }
 
     pub fn root(self) -> Option<NoteIdRef<'a>> {
@@ -498,6 +502,64 @@ mod test {
             assert_eq!(*back_again.root().unwrap().id, root_id);
             assert_eq!(back_again.mention().is_none(), true);
         }
+    }
+
+    #[tokio::test]
+    async fn nip10_reply_to_root_with_reply_tag() {
+        let db = "target/testdbs/nip10_reply_to_root_with_reply_tag";
+        test_util::cleanup_db(&db);
+
+        let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+        let filter = Filter::new().kinds(vec![1]).build();
+        let root_id: [u8; 32] =
+            hex::decode("343ff2fe97e352c7012a44dc85135dccef43acb73e459e71f7284c9627b57ab0")
+                .unwrap()
+                .try_into()
+                .unwrap();
+        let sub = ndb.subscribe(&[filter.clone()]).expect("sub_id");
+        let waiter = ndb.wait_for_notes(sub, 1);
+
+        ndb.process_event(r#"
+            ["EVENT", "huh", {
+              "id": "22c4986d970bb13a9337bdad4e462bc75c5105375669d87caeab0951e76af800",
+              "pubkey": "592295cf2b09a7f9555f43adb734cbee8a84ee892ed3f9336e6a09b6413a0db9",
+              "created_at": 1753380428,
+              "kind": 1,
+              "tags": [
+                [
+                  "e",
+                  "343ff2fe97e352c7012a44dc85135dccef43acb73e459e71f7284c9627b57ab0",
+                  "ws://relay.jb55.com/",
+                  "root",
+                  "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+                ],
+                [
+                  "e",
+                  "343ff2fe97e352c7012a44dc85135dccef43acb73e459e71f7284c9627b57ab0",
+                  "ws://relay.jb55.com/",
+                  "reply",
+                  "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+                ],
+                [
+                  "p",
+                  "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245",
+                  "ws://relay.jb55.com/"
+                ]
+              ],
+              "content": "So the user part is like nip-C0",
+              "sig": "d2224177462f3cadfba2ab946005deb3f7485232a9aed78e5304a9f96a1170b45d48c925686293a0272c661db287e201924d49f1216d402fd1f34aa57da70b60"
+            }]
+            "#).expect("process ok");
+
+        let res = waiter.await.expect("await ok");
+        assert_eq!(res, vec![NoteKey::new(1)]);
+        let txn = Transaction::new(&ndb).unwrap();
+        let res = ndb.query(&txn, &[filter], 1).expect("note");
+        let note = &res[0].note;
+        let note_reply = NoteReply::new(note.tags());
+
+        assert_eq!(note_reply.reply.is_some_and(|r| r.id == &root_id), true);
+        assert_eq!(note_reply.is_reply_to_root(), true);
     }
 
     #[tokio::test]
