@@ -611,7 +611,9 @@ pub unsafe fn root_as_ndb_profile_record_unchecked(buf: &[u8]) -> NdbProfileReco
 /// Assumes, without verification, that a buffer of bytes contains a size prefixed NdbProfileRecord and returns it.
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid size prefixed `NdbProfileRecord`.
-pub unsafe fn size_prefixed_root_as_ndb_profile_record_unchecked(buf: &[u8]) -> NdbProfileRecord<'_> {
+pub unsafe fn size_prefixed_root_as_ndb_profile_record_unchecked(
+    buf: &[u8],
+) -> NdbProfileRecord<'_> {
     flatbuffers::size_prefixed_root_unchecked::<NdbProfileRecord>(buf)
 }
 #[inline]
