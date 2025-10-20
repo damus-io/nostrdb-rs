@@ -559,7 +559,7 @@ impl core::fmt::Debug for NdbProfileRecord<'_> {
 /// `root_as_ndb_profile_record_unchecked`.
 pub fn root_as_ndb_profile_record(
     buf: &[u8],
-) -> Result<NdbProfileRecord, flatbuffers::InvalidFlatbuffer> {
+) -> Result<NdbProfileRecord<'_>, flatbuffers::InvalidFlatbuffer> {
     flatbuffers::root::<NdbProfileRecord>(buf)
 }
 #[inline]
@@ -571,7 +571,7 @@ pub fn root_as_ndb_profile_record(
 /// `size_prefixed_root_as_ndb_profile_record_unchecked`.
 pub fn size_prefixed_root_as_ndb_profile_record(
     buf: &[u8],
-) -> Result<NdbProfileRecord, flatbuffers::InvalidFlatbuffer> {
+) -> Result<NdbProfileRecord<'_>, flatbuffers::InvalidFlatbuffer> {
     flatbuffers::size_prefixed_root::<NdbProfileRecord>(buf)
 }
 #[inline]
@@ -604,14 +604,14 @@ pub fn size_prefixed_root_as_ndb_profile_record_with_opts<'b, 'o>(
 /// Assumes, without verification, that a buffer of bytes contains a NdbProfileRecord and returns it.
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid `NdbProfileRecord`.
-pub unsafe fn root_as_ndb_profile_record_unchecked(buf: &[u8]) -> NdbProfileRecord {
+pub unsafe fn root_as_ndb_profile_record_unchecked(buf: &[u8]) -> NdbProfileRecord<'_> {
     flatbuffers::root_unchecked::<NdbProfileRecord>(buf)
 }
 #[inline]
 /// Assumes, without verification, that a buffer of bytes contains a size prefixed NdbProfileRecord and returns it.
 /// # Safety
 /// Callers must trust the given bytes do indeed contain a valid size prefixed `NdbProfileRecord`.
-pub unsafe fn size_prefixed_root_as_ndb_profile_record_unchecked(buf: &[u8]) -> NdbProfileRecord {
+pub unsafe fn size_prefixed_root_as_ndb_profile_record_unchecked(buf: &[u8]) -> NdbProfileRecord<'_> {
     flatbuffers::size_prefixed_root_unchecked::<NdbProfileRecord>(buf)
 }
 #[inline]
