@@ -369,6 +369,7 @@ impl<'a> NoteBuilder<'a> {
         };
 
         if !ok {
+            builder.free_buffer();
             // this really shouldn't happen
             return None;
         }
@@ -481,7 +482,7 @@ impl<'a> NoteBuilder<'a> {
     }
 
     pub fn sign(mut self, seckey: &'a [u8; 32]) -> NoteBuilder<'a> {
-        self.options = self.options.sign(seckey);
+        self.options.sign_key = Some(seckey);
         self
     }
 
@@ -533,7 +534,23 @@ impl<'a> NoteBuilder<'a> {
             return None;
         }
 
+        // The note now owns this allocation; avoid double-free during Drop.
+        self.buffer = std::ptr::null_mut();
+
         Some(Note::new_owned(note_ptr, size))
+    }
+
+    fn free_buffer(&mut self) {
+        if !self.buffer.is_null() {
+            unsafe { libc::free(self.buffer as *mut libc::c_void) };
+            self.buffer = std::ptr::null_mut();
+        }
+    }
+}
+
+impl Drop for NoteBuilder<'_> {
+    fn drop(&mut self) {
+        self.free_buffer();
     }
 }
 
