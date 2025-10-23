@@ -282,11 +282,3 @@ Use `?` and match on specific variants for precise recovery.
 GPL-3.0-or-later. See [LICENSE](LICENSE).
 
 ---
-
-## Maintainer Notes / Open Questions
-
-- Recommended production `mapsize` guidance (beyond generic LMDB advice) needs confirmation.
-- Preferred defaults for `set_ingester_threads` under heavy load are not documented.
-- The repo does not currently include `nostrd-rs`; clarify whether there is an official companion project and how it integrates.
-- Best practices for pruning old events or compacting the LMDB environment are not yet described.
-- Confirm whether the `Filter::custom` closure is safe to block or should remain non-blocking; suggest guidelines if necessary.
