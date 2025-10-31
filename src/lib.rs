@@ -9,6 +9,7 @@ mod bindings;
 #[allow(non_snake_case)]
 #[allow(clippy::needless_lifetimes)]
 #[allow(clippy::missing_safety_doc)]
+#[allow(mismatched_lifetime_syntaxes)]
 mod ndb_profile;
 
 mod block;
@@ -19,6 +20,7 @@ mod config;
 mod error;
 mod filter;
 mod ingest;
+mod metadata;
 mod ndb;
 mod ndb_str;
 mod note;
@@ -38,6 +40,10 @@ pub use filter::{Filter, FilterBuilder, FilterElement, FilterField, MutFilterFie
 pub(crate) use future::SubscriptionState;
 pub use future::SubscriptionStream;
 pub use ingest::IngestMetadata;
+pub use metadata::{
+    CountsEntry, NoteMetadata, NoteMetadataBuf, NoteMetadataBuilder, NoteMetadataEntry,
+    NoteMetadataEntryBuf, ReactionEntry, NoteMetadataEntryVariant, Counts
+};
 pub use ndb::Ndb;
 pub use ndb_profile::{NdbProfile, NdbProfileRecord};
 pub use ndb_str::{NdbStr, NdbStrVariant};

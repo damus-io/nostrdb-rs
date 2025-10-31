@@ -3,9 +3,9 @@ use std::ptr;
 
 use crate::bindings::ndb_search;
 use crate::{
-    bindings, Blocks, Config, Error, Filter, IngestMetadata, Note, NoteKey, ProfileKey,
-    ProfileRecord, QueryResult, Result, Subscription, SubscriptionState, SubscriptionStream,
-    Transaction,
+    bindings, Blocks, Config, Error, Filter, IngestMetadata, Note, NoteKey, NoteMetadata,
+    ProfileKey, ProfileRecord, QueryResult, Result, Subscription, SubscriptionState,
+    SubscriptionStream, Transaction,
 };
 use futures::StreamExt;
 use std::collections::hash_map::Entry;
@@ -318,6 +318,27 @@ impl Ndb {
             ProfileKey::new(primkey),
             transaction,
         ))
+    }
+
+    pub fn get_note_metadata<'a>(
+        &self,
+        txn: &'a Transaction,
+        id: &[u8; 32],
+    ) -> Result<NoteMetadata<'a>> {
+        let res = unsafe {
+            let res = bindings::ndb_get_note_meta(
+                txn.as_mut_ptr(),
+                id.as_ptr() as *const ::std::os::raw::c_uchar,
+            );
+
+            if res.is_null() {
+                return Err(Error::NotFound);
+            }
+
+            &mut *res
+        };
+
+        Ok(NoteMetadata::new(res))
     }
 
     pub fn get_notekey_by_id(&self, txn: &Transaction, id: &[u8; 32]) -> Result<NoteKey> {
@@ -820,8 +841,9 @@ mod tests {
 
                 let res = sub.next();
 
-                ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+                let _ = ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
 
+                let _ = ndb.process_event(r#"["EVENT",{"content":"👀","created_at":1761514455,"id":"66af95a6bdfec756344f48241562b684082ff9c76ea940c11c4fd85e91e1219c","kind":7,"pubkey":"d5805ae449e108e907091c67cdf49a9835b3cac3dd11489ad215c0ddf7c658fc","sig":"69f4a3fe7c1cc6aa9c9cc4a2e90e4b71c3b9afaad262e68b92336e0493ff1a748b5dcc20ab6e86d4551dc5ea680ddfa1c08d47f9e4845927e143e8ef2183479b","tags":[["e","d44ad96cb8924092a76bc2afddeb12eb85233c0d03a7d9adc42c2a85a79a4305","wss://relay.primal.net/","04c915daefee38317fa734444acee390a8269fe5810b2241e5e6dd343dfbecc9"],["p","04c915daefee38317fa734444acee390a8269fe5810b2241e5e6dd343dfbecc9","wss://relay.primal.net/"],["k","1"]]}]"#);
                 let res = res.await.expect("await ok");
                 assert_eq!(res, vec![NoteKey::new(1)]);
 
