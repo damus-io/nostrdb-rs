@@ -41,8 +41,8 @@ pub(crate) use future::SubscriptionState;
 pub use future::SubscriptionStream;
 pub use ingest::IngestMetadata;
 pub use metadata::{
-    CountsEntry, NoteMetadata, NoteMetadataBuf, NoteMetadataBuilder, NoteMetadataEntry,
-    NoteMetadataEntryBuf, ReactionEntry, NoteMetadataEntryVariant, Counts
+    Counts, CountsEntry, NoteMetadata, NoteMetadataBuf, NoteMetadataBuilder, NoteMetadataEntry,
+    NoteMetadataEntryBuf, NoteMetadataEntryVariant, ReactionEntry,
 };
 pub use ndb::Ndb;
 pub use ndb_profile::{NdbProfile, NdbProfileRecord};
