@@ -25,7 +25,7 @@
 //!             println!("Thread Replies: {}", counts.thread_replies());
 //!         }
 //!         NoteMetadataEntryVariant::Reaction(reaction) => {
-//!             let mut buf = [0u8; 128];
+//!             let mut buf = [0i8; 128];
 //!             println!(
 //!                 "Reaction: {} (Count: {})",
 //!                 reaction.as_str(&mut buf),
@@ -114,10 +114,18 @@ impl<'a> ReactionEntry<'a> {
     /// Gets the string content of the reaction (e.g., "❤️" or "+").
     ///
     /// Note: This function requires a temporary buffer to write the emoji into.
-    pub fn as_str(&'a self, buf: &'a mut [u8; 128]) -> &'a str {
+    pub fn as_str(&'a self, buf: &'a mut [i8; 128]) -> &'a str {
         unsafe {
             let rstr = bindings::ndb_note_meta_reaction_str(self.as_ptr());
-            let ptr = bindings::ndb_reaction_to_str(rstr, buf.as_mut_ptr() as *mut i8);
+            // weird android compilation issue
+            #[cfg(target_os = "android")]
+            let ptr = {
+                bindings::ndb_reaction_to_str(rstr, buf.as_mut_ptr() as *mut u8)
+            };
+            #[cfg(not(target_os = "android"))]
+            let ptr = {
+                bindings::ndb_reaction_to_str(rstr, buf.as_mut_ptr())
+            };
             let byte_slice: &[u8] = std::slice::from_raw_parts(ptr as *mut u8, libc::strlen(ptr));
             std::str::from_utf8_unchecked(byte_slice)
         }
@@ -492,7 +500,7 @@ mod tests {
             let txn = Transaction::new(&ndb).unwrap();
             let meta = ndb.get_note_metadata(&txn, &id).expect("what");
             let mut count = 0;
-            let mut buf: [u8; 128] = [0; 128];
+            let mut buf: [i8; 128] = [0; 128];
 
             for entry in meta {
                 match entry {
