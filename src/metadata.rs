@@ -117,11 +117,9 @@ impl<'a> ReactionEntry<'a> {
     pub fn as_str(&'a self, buf: &'a mut [i8; 128]) -> &'a str {
         unsafe {
             let rstr = bindings::ndb_note_meta_reaction_str(self.as_ptr());
-            // weird android compilation issue
-            #[cfg(target_os = "android")]
-            let ptr = { bindings::ndb_reaction_to_str(rstr, buf.as_mut_ptr() as *mut u8) };
-            #[cfg(not(target_os = "android"))]
-            let ptr = { bindings::ndb_reaction_to_str(rstr, buf.as_mut_ptr()) };
+            // Cast to c_char for platform independence (i8 on Linux, u8 on macOS)
+            let ptr =
+                bindings::ndb_reaction_to_str(rstr, buf.as_mut_ptr() as *mut std::os::raw::c_char);
             let byte_slice: &[u8] = std::slice::from_raw_parts(ptr as *mut u8, libc::strlen(ptr));
             std::str::from_utf8_unchecked(byte_slice)
         }
