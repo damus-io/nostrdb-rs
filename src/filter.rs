@@ -34,6 +34,8 @@ where
             FilterField::Since(ref n) => fmt.field("since", n),
             FilterField::Until(ref n) => fmt.field("until", n),
             FilterField::Limit(ref n) => fmt.field("limit", n),
+            FilterField::Relays(ref n) => fmt.field("relays", n),
+            FilterField::Custom(ref n) => fmt.field("custom", n),
         }
     }
 
@@ -184,6 +186,10 @@ impl Filter {
         let mut builder = Filter::new();
         for field in filter {
             match field {
+                FilterField::Custom(_n) => {
+                    // TODO: copy custom filters
+                }
+                FilterField::Relays(relays) => builder = builder.relays(relays),
                 FilterField::Search(search) => {
                     builder = builder.search(search);
                 }
@@ -500,6 +506,10 @@ impl FilterBuilder {
         self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_SEARCH)
     }
 
+    pub fn start_relays_field(&mut self) -> Result<()> {
+        self.start_field(bindings::ndb_filter_fieldtype_NDB_FILTER_RELAYS)
+    }
+
     #[allow(dead_code)]
     pub fn start_events_field(&mut self) -> Result<()> {
         self.start_tags_field('e')
@@ -539,6 +549,18 @@ impl FilterBuilder {
     pub fn event(mut self, id: &[u8; 32]) -> Self {
         self.start_tag_field('e').unwrap();
         self.add_id_element(id).unwrap();
+        self.end_field();
+        self
+    }
+
+    pub fn relays<'a, I>(mut self, relays: I) -> Self
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        self.start_relays_field().unwrap();
+        for relay in relays {
+            self.add_str_element(relay).unwrap();
+        }
         self.end_field();
         self
     }
@@ -752,6 +774,12 @@ pub struct FilterIdElements<'a> {
 }
 
 #[derive(Copy, Clone, Debug)]
+pub struct FilterStrElements<'a> {
+    filter: &'a bindings::ndb_filter,
+    elements: *mut bindings::ndb_filter_elements,
+}
+
+#[derive(Copy, Clone, Debug)]
 pub struct FilterIntElements<'a> {
     _filter: &'a bindings::ndb_filter,
     elements: *mut bindings::ndb_filter_elements,
@@ -759,6 +787,11 @@ pub struct FilterIntElements<'a> {
 
 pub struct FilterIdElemIter<'a> {
     ids: FilterIdElements<'a>,
+    index: i32,
+}
+
+pub struct FilterStrElemIter<'a> {
+    strs: FilterStrElements<'a>,
     index: i32,
 }
 
@@ -775,6 +808,17 @@ impl<'a> FilterIdElemIter<'a> {
 
     pub fn done(&self) -> bool {
         self.index >= self.ids.count()
+    }
+}
+
+impl<'a> FilterStrElemIter<'a> {
+    pub(crate) fn new(strs: FilterStrElements<'a>) -> Self {
+        let index = 0;
+        Self { strs, index }
+    }
+
+    pub fn done(&self) -> bool {
+        self.index >= self.strs.count()
     }
 }
 
@@ -823,6 +867,40 @@ impl<'a> FilterIdElements<'a> {
     }
 }
 
+impl<'a> FilterStrElements<'a> {
+    pub(crate) fn new(
+        filter: &'a bindings::ndb_filter,
+        elements: *mut bindings::ndb_filter_elements,
+    ) -> Self {
+        Self { filter, elements }
+    }
+
+    pub fn count(&self) -> i32 {
+        unsafe { &*self.elements }.count
+    }
+
+    /// Field element type. In the case of ids, it would be FieldElemType::Id, etc
+    fn elemtype(&self) -> FieldElemType {
+        FieldElemType::new(unsafe { &*self.elements }.field.elem_type)
+            .expect("expected valid filter element type")
+    }
+
+    pub fn get(self, index: i32) -> Option<&'a str> {
+        assert!(self.elemtype() == FieldElemType::Id);
+
+        let ptr = unsafe {
+            bindings::ndb_filter_get_string_element(self.filter.as_ptr(), self.elements, index)
+        };
+
+        if ptr.is_null() {
+            return None;
+        }
+
+        let byte_slice = unsafe { std::slice::from_raw_parts(ptr as *mut u8, libc::strlen(ptr)) };
+        Some(unsafe { std::str::from_utf8_unchecked(byte_slice) })
+    }
+}
+
 impl<'a> FilterIntElements<'a> {
     pub(crate) fn new(
         filter: &'a bindings::ndb_filter,
@@ -862,6 +940,8 @@ pub enum FilterField<'a> {
     Since(u64),
     Until(u64),
     Limit(u64),
+    Relays(FilterStrElements<'a>),
+    Custom(u64),
 }
 
 pub enum MutFilterField<'a> {
@@ -873,6 +953,12 @@ pub enum MutFilterField<'a> {
 impl<'a> FilterField<'a> {
     pub fn new(elements: FilterElements<'a>) -> Self {
         match elements.fieldtype() {
+            FilterFieldType::Custom => FilterField::Custom(0),
+
+            FilterFieldType::Relays => {
+                FilterField::Relays(FilterStrElements::new(elements.filter(), elements.as_ptr()))
+            }
+
             FilterFieldType::Search => {
                 for element in elements {
                     if let FilterElement::Str(s) = element {
@@ -1054,6 +1140,8 @@ pub enum FilterFieldType {
     Until,
     Limit,
     Search,
+    Relays,
+    Custom,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -1100,6 +1188,10 @@ impl FilterFieldType {
             Some(FilterFieldType::Limit)
         } else if val == bindings::ndb_filter_fieldtype_NDB_FILTER_SEARCH {
             Some(FilterFieldType::Search)
+        } else if val == bindings::ndb_filter_fieldtype_NDB_FILTER_RELAYS {
+            Some(FilterFieldType::Relays)
+        } else if val == bindings::ndb_filter_fieldtype_NDB_FILTER_CUSTOM {
+            Some(FilterFieldType::Custom)
         } else {
             None
         }
@@ -1177,6 +1269,15 @@ impl<'a> IntoIterator for FilterIdElements<'a> {
     }
 }
 
+impl<'a> IntoIterator for FilterStrElements<'a> {
+    type Item = &'a str;
+    type IntoIter = FilterStrElemIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        FilterStrElemIter::new(self)
+    }
+}
+
 impl<'a> IntoIterator for FilterIntElements<'a> {
     type Item = u64;
     type IntoIter = FilterIntElemIter<'a>;
@@ -1198,6 +1299,21 @@ impl Iterator for FilterIntElemIter<'_> {
         self.index += 1;
 
         self.ints.get(ind)
+    }
+}
+
+impl<'a> Iterator for FilterStrElemIter<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<&'a str> {
+        if self.done() {
+            return None;
+        }
+
+        let ind = self.index;
+        self.index += 1;
+
+        self.strs.get(ind)
     }
 }
 

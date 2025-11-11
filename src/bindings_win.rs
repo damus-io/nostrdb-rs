@@ -2501,6 +2501,10 @@ pub struct ndb_packed_str {
 pub struct bolt11 {
     _unused: [u8; 0],
 }
+pub const ndb_metadata_type_NDB_NOTE_META_RESERVED: ndb_metadata_type = 0;
+pub const ndb_metadata_type_NDB_NOTE_META_COUNTS: ndb_metadata_type = 100;
+pub const ndb_metadata_type_NDB_NOTE_META_REACTION: ndb_metadata_type = 200;
+pub type ndb_metadata_type = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ndb_tag_ptr {
@@ -2678,6 +2682,120 @@ fn bindgen_test_layout_ndb_t() {
             stringify!(ndb_t),
             "::",
             stringify!(ndb)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union ndb_reaction_str {
+    pub binmoji: u64,
+    pub packed: ndb_reaction_str__bindgen_ty_1,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_reaction_str__bindgen_ty_1 {
+    pub flag: u8,
+    pub str_: [::std::os::raw::c_char; 7usize],
+}
+#[test]
+fn bindgen_test_layout_ndb_reaction_str__bindgen_ty_1() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_reaction_str__bindgen_ty_1> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_reaction_str__bindgen_ty_1>(),
+        8usize,
+        concat!("Size of: ", stringify!(ndb_reaction_str__bindgen_ty_1))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_reaction_str__bindgen_ty_1>(),
+        1usize,
+        concat!("Alignment of ", stringify!(ndb_reaction_str__bindgen_ty_1))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).flag) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_reaction_str__bindgen_ty_1),
+            "::",
+            stringify!(flag)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).str_) as usize - ptr as usize },
+        1usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_reaction_str__bindgen_ty_1),
+            "::",
+            stringify!(str_)
+        )
+    );
+}
+#[test]
+fn bindgen_test_layout_ndb_reaction_str() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_reaction_str> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_reaction_str>(),
+        8usize,
+        concat!("Size of: ", stringify!(ndb_reaction_str))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_reaction_str>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_reaction_str))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).binmoji) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_reaction_str),
+            "::",
+            stringify!(binmoji)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).packed) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_reaction_str),
+            "::",
+            stringify!(packed)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_note_meta_builder {
+    pub cursor: cursor,
+}
+#[test]
+fn bindgen_test_layout_ndb_note_meta_builder() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_note_meta_builder> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_note_meta_builder>(),
+        24usize,
+        concat!("Size of: ", stringify!(ndb_note_meta_builder))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_note_meta_builder>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_note_meta_builder))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).cursor) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_builder),
+            "::",
+            stringify!(cursor)
         )
     );
 }
@@ -3500,6 +3618,59 @@ fn bindgen_test_layout_ndb_note_relay_iterator() {
             stringify!(ndb_note_relay_iterator),
             "::",
             stringify!(mdb_cur)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_note_meta_iterator {
+    pub header: *mut ndb_note_meta,
+    pub cur: *mut ndb_note_meta,
+    pub index: ::std::os::raw::c_int,
+}
+#[test]
+fn bindgen_test_layout_ndb_note_meta_iterator() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_note_meta_iterator> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_note_meta_iterator>(),
+        24usize,
+        concat!("Size of: ", stringify!(ndb_note_meta_iterator))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_note_meta_iterator>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_note_meta_iterator))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).header) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_iterator),
+            "::",
+            stringify!(header)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).cur) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_iterator),
+            "::",
+            stringify!(cur)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).index) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_iterator),
+            "::",
+            stringify!(index)
         )
     );
 }
@@ -5386,13 +5557,6 @@ extern "C" {
     pub fn ndb_get_note_by_key(txn: *mut ndb_txn, key: u64, len: *mut usize) -> *mut ndb_note;
 }
 extern "C" {
-    pub fn ndb_get_note_meta(
-        txn: *mut ndb_txn,
-        id: *const ::std::os::raw::c_uchar,
-        len: *mut usize,
-    ) -> *mut ::std::os::raw::c_void;
-}
-extern "C" {
     pub fn ndb_note_seen_on_relay(
         txn: *mut ndb_txn,
         note_key: u64,
@@ -5690,6 +5854,134 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
+    pub fn ndb_note_meta_builder_init(
+        builder: *mut ndb_note_meta_builder,
+        arg1: *mut ::std::os::raw::c_uchar,
+        arg2: usize,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_set_note_meta(
+        ndb: *mut ndb,
+        id: *const ::std::os::raw::c_uchar,
+        meta: *mut ndb_note_meta,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_note_meta_total_size(header: *mut ndb_note_meta) -> usize;
+}
+extern "C" {
+    pub fn ndb_get_note_meta(
+        txn: *mut ndb_txn,
+        id: *const ::std::os::raw::c_uchar,
+    ) -> *mut ndb_note_meta;
+}
+extern "C" {
+    pub fn ndb_note_meta_add_entry(builder: *mut ndb_note_meta_builder)
+        -> *mut ndb_note_meta_entry;
+}
+extern "C" {
+    pub fn ndb_note_meta_builder_find_entry(
+        builder: *mut ndb_note_meta_builder,
+        type_: u16,
+        payload: *mut u64,
+    ) -> *mut ndb_note_meta_entry;
+}
+extern "C" {
+    pub fn ndb_note_meta_entries(meta: *mut ndb_note_meta) -> *mut ndb_note_meta_entry;
+}
+extern "C" {
+    pub fn ndb_note_meta_entry_at(
+        meta: *mut ndb_note_meta,
+        ind: ::std::os::raw::c_int,
+    ) -> *mut ndb_note_meta_entry;
+}
+extern "C" {
+    pub fn ndb_note_meta_find_entry(
+        meta: *mut ndb_note_meta,
+        type_: u16,
+        payload: *mut u64,
+    ) -> *mut ndb_note_meta_entry;
+}
+extern "C" {
+    pub fn ndb_note_meta_counts_direct_replies(entry: *mut ndb_note_meta_entry) -> *mut u16;
+}
+extern "C" {
+    pub fn ndb_note_meta_counts_quotes(entry: *mut ndb_note_meta_entry) -> *mut u16;
+}
+extern "C" {
+    pub fn ndb_note_meta_counts_reposts(entry: *mut ndb_note_meta_entry) -> *mut u16;
+}
+extern "C" {
+    pub fn ndb_note_meta_entry_type(entry: *mut ndb_note_meta_entry) -> *mut u16;
+}
+extern "C" {
+    pub fn ndb_note_meta_entries_count(meta: *mut ndb_note_meta) -> u16;
+}
+extern "C" {
+    pub fn ndb_note_meta_counts_thread_replies(entry: *mut ndb_note_meta_entry) -> *mut u32;
+}
+extern "C" {
+    pub fn ndb_note_meta_counts_total_reactions(entry: *mut ndb_note_meta_entry) -> *mut u32;
+}
+extern "C" {
+    pub fn ndb_note_meta_reaction_count(entry: *mut ndb_note_meta_entry) -> *mut u32;
+}
+extern "C" {
+    pub fn ndb_note_meta_reaction_str(entry: *mut ndb_note_meta_entry) -> *mut ndb_reaction_str;
+}
+extern "C" {
+    pub fn ndb_note_meta_flags(meta: *mut ndb_note_meta) -> *mut u64;
+}
+extern "C" {
+    pub fn ndb_note_meta_build(builder: *mut ndb_note_meta_builder, meta: *mut *mut ndb_note_meta);
+}
+extern "C" {
+    pub fn ndb_note_meta_builder_resized(
+        builder: *mut ndb_note_meta_builder,
+        buf: *mut ::std::os::raw::c_uchar,
+        bufsize: usize,
+    );
+}
+extern "C" {
+    pub fn ndb_note_meta_counts_set(
+        entry: *mut ndb_note_meta_entry,
+        total_reactions: u32,
+        quotes: u16,
+        direct_replies: u16,
+        thread_replies: u32,
+        reposts: u16,
+    );
+}
+extern "C" {
+    pub fn ndb_note_meta_header_init(arg1: *mut ndb_note_meta);
+}
+extern "C" {
+    pub fn ndb_note_meta_reaction_set(
+        entry: *mut ndb_note_meta_entry,
+        count: u32,
+        str_: ndb_reaction_str,
+    );
+}
+extern "C" {
+    pub fn print_note_meta(meta: *mut ndb_note_meta);
+}
+extern "C" {
+    pub fn ndb_reaction_set(
+        reaction: *mut ndb_reaction_str,
+        str_: *const ::std::os::raw::c_char,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_reaction_str_is_emoji(arg1: ndb_reaction_str) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_reaction_to_str(
+        str_: *mut ndb_reaction_str,
+        buf: *mut ::std::os::raw::c_char,
+    ) -> *const ::std::os::raw::c_char;
+}
+extern "C" {
     pub fn ndb_stat(ndb: *mut ndb, stat: *mut ndb_stat) -> ::std::os::raw::c_int;
 }
 extern "C" {
@@ -5835,6 +6127,421 @@ extern "C" {
 }
 extern "C" {
     pub fn ndb_bech32_block(block: *mut ndb_block) -> *mut nostr_bech32;
+}
+pub const ndb_meta_clone_result_NDB_META_CLONE_FAILED: ndb_meta_clone_result = 0;
+pub const ndb_meta_clone_result_NDB_META_CLONE_EXISTING_ENTRY: ndb_meta_clone_result = 1;
+pub const ndb_meta_clone_result_NDB_META_CLONE_NEW_ENTRY: ndb_meta_clone_result = 2;
+pub type ndb_meta_clone_result = ::std::os::raw::c_int;
+extern "C" {
+    pub fn ndb_note_meta_clone_with_entry(
+        meta: *mut *mut ndb_note_meta,
+        entry: *mut *mut ndb_note_meta_entry,
+        type_: u16,
+        payload: *mut u64,
+        buf: *mut ::std::os::raw::c_uchar,
+        bufsize: usize,
+    ) -> ndb_meta_clone_result;
+}
+#[repr(C, packed)]
+#[derive(Copy, Clone)]
+pub struct ndb_note_meta_entry {
+    pub type_: u16,
+    pub aux2: ndb_note_meta_entry__bindgen_ty_1,
+    pub aux: ndb_note_meta_entry__bindgen_ty_2,
+    pub payload: ndb_note_meta_entry__bindgen_ty_3,
+}
+#[repr(C, packed)]
+#[derive(Copy, Clone)]
+pub union ndb_note_meta_entry__bindgen_ty_1 {
+    pub flags: u16,
+    pub reposts: u16,
+}
+#[test]
+fn bindgen_test_layout_ndb_note_meta_entry__bindgen_ty_1() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_note_meta_entry__bindgen_ty_1> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_note_meta_entry__bindgen_ty_1>(),
+        2usize,
+        concat!("Size of: ", stringify!(ndb_note_meta_entry__bindgen_ty_1))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_note_meta_entry__bindgen_ty_1>(),
+        1usize,
+        concat!(
+            "Alignment of ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_1)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).flags) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_1),
+            "::",
+            stringify!(flags)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).reposts) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_1),
+            "::",
+            stringify!(reposts)
+        )
+    );
+}
+#[repr(C, packed)]
+#[derive(Copy, Clone)]
+pub union ndb_note_meta_entry__bindgen_ty_2 {
+    pub value: u32,
+    pub total_reactions: u32,
+}
+#[test]
+fn bindgen_test_layout_ndb_note_meta_entry__bindgen_ty_2() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_note_meta_entry__bindgen_ty_2> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_note_meta_entry__bindgen_ty_2>(),
+        4usize,
+        concat!("Size of: ", stringify!(ndb_note_meta_entry__bindgen_ty_2))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_note_meta_entry__bindgen_ty_2>(),
+        1usize,
+        concat!(
+            "Alignment of ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_2)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).value) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_2),
+            "::",
+            stringify!(value)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).total_reactions) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_2),
+            "::",
+            stringify!(total_reactions)
+        )
+    );
+}
+#[repr(C, packed)]
+#[derive(Copy, Clone)]
+pub union ndb_note_meta_entry__bindgen_ty_3 {
+    pub value: u64,
+    pub offset: ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_1,
+    pub counts: ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_2,
+    pub reaction_str: ndb_reaction_str,
+}
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_1 {
+    pub offset: u32,
+    pub padding: u32,
+}
+#[test]
+fn bindgen_test_layout_ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_1() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_1> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_1>(),
+        8usize,
+        concat!(
+            "Size of: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_1)
+        )
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_1>(),
+        1usize,
+        concat!(
+            "Alignment of ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_1)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).offset) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_1),
+            "::",
+            stringify!(offset)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).padding) as usize - ptr as usize },
+        4usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_1),
+            "::",
+            stringify!(padding)
+        )
+    );
+}
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_2 {
+    pub direct_replies: u16,
+    pub quotes: u16,
+    pub thread_replies: u32,
+}
+#[test]
+fn bindgen_test_layout_ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_2() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_2> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_2>(),
+        8usize,
+        concat!(
+            "Size of: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_2)
+        )
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_2>(),
+        1usize,
+        concat!(
+            "Alignment of ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_2)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).direct_replies) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_2),
+            "::",
+            stringify!(direct_replies)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).quotes) as usize - ptr as usize },
+        2usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_2),
+            "::",
+            stringify!(quotes)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).thread_replies) as usize - ptr as usize },
+        4usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3__bindgen_ty_2),
+            "::",
+            stringify!(thread_replies)
+        )
+    );
+}
+#[test]
+fn bindgen_test_layout_ndb_note_meta_entry__bindgen_ty_3() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_note_meta_entry__bindgen_ty_3> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_note_meta_entry__bindgen_ty_3>(),
+        8usize,
+        concat!("Size of: ", stringify!(ndb_note_meta_entry__bindgen_ty_3))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_note_meta_entry__bindgen_ty_3>(),
+        1usize,
+        concat!(
+            "Alignment of ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).value) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3),
+            "::",
+            stringify!(value)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).offset) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3),
+            "::",
+            stringify!(offset)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).counts) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3),
+            "::",
+            stringify!(counts)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).reaction_str) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry__bindgen_ty_3),
+            "::",
+            stringify!(reaction_str)
+        )
+    );
+}
+#[test]
+fn bindgen_test_layout_ndb_note_meta_entry() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_note_meta_entry> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_note_meta_entry>(),
+        16usize,
+        concat!("Size of: ", stringify!(ndb_note_meta_entry))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_note_meta_entry>(),
+        1usize,
+        concat!("Alignment of ", stringify!(ndb_note_meta_entry))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).type_) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry),
+            "::",
+            stringify!(type_)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).aux2) as usize - ptr as usize },
+        2usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry),
+            "::",
+            stringify!(aux2)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).aux) as usize - ptr as usize },
+        4usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry),
+            "::",
+            stringify!(aux)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).payload) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta_entry),
+            "::",
+            stringify!(payload)
+        )
+    );
+}
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_note_meta {
+    pub version: u8,
+    pub padding: u8,
+    pub count: u16,
+    pub data_table_size: u32,
+    pub flags: u64,
+}
+#[test]
+fn bindgen_test_layout_ndb_note_meta() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_note_meta> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_note_meta>(),
+        16usize,
+        concat!("Size of: ", stringify!(ndb_note_meta))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_note_meta>(),
+        1usize,
+        concat!("Alignment of ", stringify!(ndb_note_meta))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).version) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta),
+            "::",
+            stringify!(version)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).padding) as usize - ptr as usize },
+        1usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta),
+            "::",
+            stringify!(padding)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).count) as usize - ptr as usize },
+        2usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta),
+            "::",
+            stringify!(count)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).data_table_size) as usize - ptr as usize },
+        4usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta),
+            "::",
+            stringify!(data_table_size)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).flags) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_note_meta),
+            "::",
+            stringify!(flags)
+        )
+    );
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
