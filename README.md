@@ -77,6 +77,12 @@ for note in txn.query(&filter)? {
 See [`examples/`](examples) and the mdBook *CLI Guide* for richer workflows
 (thread queries, relay metadata, async subscriptions).
 
+Available examples:
+
+- `ingest` – load LDJSON fixtures while tagging the source relay.
+- `query` – mimic `ndb query` with `--kind`, `--search`, and `--limit` options.
+- `subscription` – spawn an async stream that prints new notes as they arrive.
+
 ## Regenerating bindings
 
 When the `schemas/*.fbs` or C headers change upstream:
