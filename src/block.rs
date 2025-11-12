@@ -1,11 +1,15 @@
+//! Parsed content blocks (see mdBook *Architecture → Blocks*).
+
 use crate::{bindings, Note, Transaction};
 
+/// Parsed block cache for a note; freed when dropped or when the owning transaction ends.
 #[derive(Debug)]
 pub struct Blocks<'a> {
     ptr: *mut bindings::ndb_blocks,
     txn: Option<&'a Transaction>,
 }
 
+/// Individual parsed block (text, mention, invoice, etc).
 #[derive(Debug)]
 pub struct Block<'a> {
     ptr: *mut bindings::ndb_block,
@@ -19,6 +23,7 @@ pub struct BlockIter<'a> {
     txn: Option<&'a Transaction>,
 }
 
+/// Type of content segment extracted from a note’s body.
 #[derive(Debug, Eq, PartialEq)]
 pub enum BlockType {
     Hashtag,
@@ -29,6 +34,7 @@ pub enum BlockType {
     Invoice,
 }
 
+/// Kind of bech32 mention encountered in content.
 #[derive(Debug, Eq, PartialEq)]
 pub enum Bech32Type {
     Event,

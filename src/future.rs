@@ -1,3 +1,5 @@
+//! Async helpers for nostrdb subscriptions (see mdBook *CLI Guide → query* for semantics).
+
 use crate::{Ndb, NoteKey, Subscription};
 
 use std::{
@@ -15,8 +17,7 @@ pub(crate) struct SubscriptionState {
     pub waker: Option<std::task::Waker>,
 }
 
-/// A subscription that you can .await on. This can enables very clean
-/// integration into Rust's async state machinery.
+/// Stream of note ids yielded by a nostrdb subscription.
 pub struct SubscriptionStream {
     // some handle or state
     // e.g., a reference to a non-blocking API or a shared atomic state
@@ -27,6 +28,7 @@ pub struct SubscriptionStream {
 }
 
 impl SubscriptionStream {
+    /// Wrap an existing subscription id. Defaults to 32 notes per poll and unsubscribes on drop.
     pub fn new(ndb: Ndb, sub_id: Subscription) -> Self {
         // Most of the time we only want to fetch a few things. If expecting
         // lots of data, use `set_max_notes_per_await`
@@ -40,6 +42,7 @@ impl SubscriptionStream {
         }
     }
 
+    /// Override the batch size returned per `poll_next`.
     pub fn notes_per_await(mut self, max_notes: u32) -> Self {
         self.max_notes = max_notes;
         self
@@ -52,6 +55,7 @@ impl SubscriptionStream {
         self
     }
 
+    /// Access the underlying subscription id.
     pub fn sub_id(&self) -> Subscription {
         self.sub_id
     }

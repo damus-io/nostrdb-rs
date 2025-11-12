@@ -1,6 +1,9 @@
+//! Metadata accompanying ingested events (see mdBook *Architecture → Ingestion pipeline*).
+
 use crate::bindings;
 use std::ffi::CString;
 
+/// Optional relay/client context recorded during ingestion.
 pub struct IngestMetadata {
     meta: bindings::ndb_ingest_meta,
     relay: Option<CString>,

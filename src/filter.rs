@@ -1,3 +1,5 @@
+//! Rust-side filter builders mirroring nostrdb’s NIP-01 filters (see mdBook *API Tour → Filters*).
+
 use crate::{bindings, Error, FilterError, Note, Result};
 use std::ffi::CString;
 use std::fmt;
@@ -7,11 +9,13 @@ use std::ptr::null_mut;
 use std::sync::Arc;
 use tracing::debug;
 
+/// Builder for nostr filters. Not thread-safe; build once then share the resulting [`Filter`].
 pub struct FilterBuilder {
     pub data: bindings::ndb_filter,
     pub custom_ctx: Option<*mut c_void>,
 }
 
+/// Owned filter that can be reused in queries and subscriptions.
 pub struct Filter {
     pub data: bindings::ndb_filter,
     pub custom_ctx: Option<Arc<*mut c_void>>,
@@ -167,6 +171,7 @@ impl bindings::ndb_filter {
 }
 
 impl Filter {
+    /// Create a builder with a specific page capacity (multiples of 4 KiB scratch buffers).
     pub fn new_with_capacity(pages: i32) -> FilterBuilder {
         FilterBuilder {
             data: bindings::ndb_filter::new(pages),
@@ -175,10 +180,12 @@ impl Filter {
     }
 
     #[allow(clippy::new_ret_no_self)]
+    /// Create a builder with default capacity (suitable for most desktop queries).
     pub fn new() -> FilterBuilder {
         Self::new_with_capacity(256)
     }
 
+    /// Clone an existing filter into a mutable builder (used for query tweaks).
     pub fn copy_from<'a, I>(filter: I) -> FilterBuilder
     where
         I: IntoIterator<Item = FilterField<'a>>,

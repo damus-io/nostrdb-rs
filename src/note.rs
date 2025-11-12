@@ -1,6 +1,9 @@
+//! Zero-copy note wrappers around `ndb_note` (see mdBook *Architecture* & *API Tour → Note*).
+
 use crate::{bindings, tags::Tags, transaction::Transaction, Error, NoteRelays};
 use std::{hash::Hash, os::raw::c_uchar};
 
+/// Primary key inside LMDB (stable across transactions).
 #[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub struct NoteKey(u64);
 
@@ -14,6 +17,7 @@ impl NoteKey {
     }
 }
 
+/// Additional knobs when finalizing a [`NoteBuilder`].
 pub struct NoteBuildOptions<'a> {
     /// Generate the created_at based on the current time, otherwise the id field will remain untouched
     pub set_created_at: bool,
@@ -43,6 +47,7 @@ impl<'a> NoteBuildOptions<'a> {
     }
 }
 
+/// Smart pointer around owned, unowned, or transactional notes.
 #[derive(Debug)]
 pub enum Note<'a> {
     /// A note in-memory outside of nostrdb. This note is a pointer to a note in
@@ -339,6 +344,7 @@ impl Default for bindings::cursor {
     }
 }
 
+/// Fluent builder for nostr events (mirrors the C builder in mdBook *API Tour → Builder*).
 pub struct NoteBuilder<'a> {
     buffer: *mut ::std::os::raw::c_uchar,
     builder: bindings::ndb_builder,
@@ -352,6 +358,7 @@ impl Default for NoteBuilder<'_> {
 }
 
 impl<'a> NoteBuilder<'a> {
+    /// Allocate a builder with a custom backing buffer (bytes). Bigger notes may require >1MiB.
     pub fn with_bufsize(size: usize) -> Option<Self> {
         let buffer: *mut c_uchar = unsafe { libc::malloc(size as libc::size_t) as *mut c_uchar };
         if buffer.is_null() {
@@ -376,8 +383,7 @@ impl<'a> NoteBuilder<'a> {
         Some(builder)
     }
 
-    /// Create a note builder with a 1mb buffer, if you need bigger notes
-    /// then use with_bufsize with a custom buffer size
+    /// Create a note builder with a 1 MiB buffer.
     pub fn new() -> Self {
         let default_bufsize = 1024usize * 1024usize;
         Self::with_bufsize(default_bufsize).expect("OOM when creating NoteBuilder")
@@ -485,6 +491,7 @@ impl<'a> NoteBuilder<'a> {
         self
     }
 
+    /// Finalize the note, optionally signing it when a secret key was provided in [`NoteBuildOptions`].
     pub fn build(&mut self) -> Option<Note<'static>> {
         let mut note_ptr: *mut bindings::ndb_note = std::ptr::null_mut();
         let mut keypair = bindings::ndb_keypair::default();
