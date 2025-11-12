@@ -1,5 +1,7 @@
+//! Configuration helpers around `ndb_config` (see the mdBook API Tour).
 use crate::bindings;
 
+/// High-level builder for `ndb_config` (see the nostrdb mdBook *Getting Started* chapter).
 #[derive(Copy, Clone)]
 pub struct Config {
     pub config: bindings::ndb_config,
@@ -12,6 +14,7 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Create a config populated with nostrdb defaults.
     pub fn new() -> Self {
         let mut config = bindings::ndb_config {
             filter_context: std::ptr::null_mut(),
@@ -31,12 +34,13 @@ impl Config {
         Config { config }
     }
 
-    //
+    /// Set raw flag bits (advanced). Prefer the dedicated helpers when possible.
     pub fn set_flags(mut self, flags: i32) -> Self {
         self.config.flags = flags;
         self
     }
 
+    /// Skip signature verification during ingestion. Mirror of `NDB_FLAG_SKIP_NOTE_VERIFY`.
     pub fn skip_validation(mut self, skip: bool) -> Self {
         let skip_note_verify: i32 = 1 << 1;
 
@@ -47,6 +51,11 @@ impl Config {
         }
 
         self
+    }
+
+    /// Convenience alias for [`Config::skip_validation`].
+    pub fn skip_verification(self, skip: bool) -> Self {
+        self.skip_validation(skip)
     }
 
     /// Set a callback to be notified on updated subscriptions. The function
@@ -66,17 +75,20 @@ impl Config {
         self
     }
 
+    /// Configure LMDB map size in bytes. Must be large enough to hold your dataset.
     pub fn set_mapsize(mut self, bytes: usize) -> Self {
         self.config.mapsize = bytes;
         self
     }
 
+    /// Number of ingest worker threads (see mdBook *Architecture → Ingestion*).
     pub fn set_ingester_threads(mut self, threads: i32) -> Self {
         self.config.ingester_threads = threads;
         self
     }
 
-    // Internal method to get a raw pointer to the config, used in Ndb
+    /// # Internal
+    /// Raw pointer accessor used by `Ndb::open`.
     pub fn as_ptr(&self) -> *const bindings::ndb_config {
         &self.config
     }

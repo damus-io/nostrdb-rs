@@ -1,3 +1,5 @@
+//! Safe wrapper over the nostrdb engine (see mdBook *Architecture* for internals).
+
 use std::ffi::CString;
 use std::ptr;
 
@@ -44,7 +46,7 @@ impl Drop for NdbRef {
 
 type SubMap = HashMap<Subscription, SubscriptionState>;
 
-/// A nostrdb context. Construct one of these with [Ndb::new].
+/// Handle to an LMDB-backed nostrdb environment. Cheap to clone (`Arc` internally).
 #[derive(Debug, Clone)]
 pub struct Ndb {
     refs: Arc<NdbRef>,
@@ -54,8 +56,11 @@ pub struct Ndb {
 }
 
 impl Ndb {
-    /// Construct a new nostrdb context. Takes a directory where the database
-    /// is/will be located and a nostrdb config.
+    /// Open (or create) an LMDB environment at `db_dir`.
+    ///
+    /// The call mirrors `ndb_init` and will reduce the map size automatically if LMDB
+    /// refuses the requested allocation. See the mdBook *Getting Started* chapter
+    /// for sizing guidance.
     pub fn new(db_dir: &str, config: &Config) -> Result<Self> {
         let db_dir_cstr = match CString::new(db_dir) {
             Ok(cstr) => cstr,
@@ -123,9 +128,8 @@ impl Ndb {
         Ok(Ndb { refs, subs })
     }
 
-    /// Ingest a relay or client sent event, with optional relay metadata.
-    /// This function returns immediately and doesn't provide any information on
-    /// if ingestion was successful or not.
+    /// Ingest a relay or client sent event, optionally tagging the source relay.
+    /// Mirrors `ndb_process_event_with`; see mdBook *Getting Started → Sample data*.
     pub fn process_event_with(&self, json: &str, mut meta: IngestMetadata) -> Result<()> {
         // Convert the Rust string to a C-style string
         let c_json = CString::new(json)?;
@@ -145,20 +149,17 @@ impl Ndb {
         Ok(())
     }
 
-    /// Ingest a relay-sent event in the form `["EVENT","subid", {"id:"...}]`
-    /// This function returns immediately and doesn't provide any information on
-    /// if ingestion was successful or not.
+    /// Ingest a relay-sent event in the form `["EVENT","subid", {"id":"..."}]`.
     pub fn process_event(&self, json: &str) -> Result<()> {
         self.process_event_with(json, IngestMetadata::new().client(false))
     }
 
-    /// Ingest a client-sent event in the form `["EVENT", {"id:"...}]`
-    /// This function returns immediately and doesn't provide any information on
-    /// if ingestion was successful or not.
+    /// Ingest a client-sent event in the form `["EVENT", {"id":"..."}]`.
     pub fn process_client_event(&self, json: &str) -> Result<()> {
         self.process_event_with(json, IngestMetadata::new().client(true))
     }
 
+    /// Execute nostr filters inside an existing transaction. Results borrow from the txn.
     pub fn query<'a>(
         &self,
         txn: &'a Transaction,
@@ -189,10 +190,12 @@ impl Ndb {
         }
     }
 
+    /// Number of active subscriptions currently tracked.
     pub fn subscription_count(&self) -> u32 {
         unsafe { bindings::ndb_num_subscriptions(self.as_ptr()) as u32 }
     }
 
+    /// Cancel an active subscription.
     pub fn unsubscribe(&mut self, sub: Subscription) -> Result<()> {
         let r = unsafe { bindings::ndb_unsubscribe(self.as_ptr(), sub.id()) };
 
@@ -217,6 +220,7 @@ impl Ndb {
         }
     }
 
+    /// Register a set of filters and receive a [`Subscription`] handle.
     pub fn subscribe(&self, filters: &[Filter]) -> Result<Subscription> {
         unsafe {
             let mut ndb_filters: Vec<bindings::ndb_filter> =
@@ -234,6 +238,7 @@ impl Ndb {
         }
     }
 
+    /// Non-blocking check for new note ids matching a subscription.
     pub fn poll_for_notes(&self, sub: Subscription, max_notes: u32) -> Vec<NoteKey> {
         let mut vec = vec![];
         vec.reserve_exact(max_notes as usize);
@@ -251,6 +256,7 @@ impl Ndb {
         vec.into_iter().map(NoteKey::new).collect()
     }
 
+    /// Async convenience wrapper that resolves once up to `max_notes` arrive.
     pub async fn wait_for_notes(
         &self,
         sub_id: Subscription,

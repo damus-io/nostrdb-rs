@@ -1,16 +1,18 @@
+//! Read-only query transactions. See mdBook *Architecture → Query path*.
+
 use crate::bindings;
 use crate::error::Error;
 use crate::ndb::Ndb;
 use crate::result::Result;
 
-/// A `nostrdb` transaction. Only one is allowed to be active per thread.
+/// Read-only LMDB transaction (nostrdb enforces one per thread).
 #[derive(Debug)]
 pub struct Transaction {
     txn: bindings::ndb_txn,
 }
 
 impl Transaction {
-    /// Create a new `nostrdb` transaction. These are reference counted
+    /// Begin a new `ndb_begin_query` session scoped to the current thread.
     pub fn new(ndb: &Ndb) -> Result<Self> {
         // Initialize your transaction here
         let mut txn = bindings::ndb_txn::new();
@@ -23,10 +25,12 @@ impl Transaction {
         Ok(Transaction { txn })
     }
 
+    /// Raw pointer for FFI calls. Borrowed; do not free.
     pub fn as_ptr(&self) -> *const bindings::ndb_txn {
         &self.txn
     }
 
+    /// Mutable raw pointer (e.g., `ndb_query` expects one).
     pub fn as_mut_ptr(&self) -> *mut bindings::ndb_txn {
         self.as_ptr() as *mut bindings::ndb_txn
     }
