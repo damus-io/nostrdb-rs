@@ -30,6 +30,10 @@ fn secp256k1_build(base_config: &mut Build) {
         .file("nostrdb/deps/secp256k1/src/precomputed_ecmult.c")
         .file("nostrdb/deps/secp256k1/src/secp256k1.c");
 
+    // libsodium
+    //base_config
+    //.file("nostrdb/deps/libsodium/src/libsodium/crypto_stream/chacha20/stream_chacha20.c");
+
     if env::var("PROFILE").unwrap() == "debug" {
         base_config.flag("-O1");
     }
@@ -69,6 +73,10 @@ fn main() {
             "nostrdb/src/bolt11/bech32.c",
             "nostrdb/src/block.c",
             "nostrdb/src/metadata.c",
+            "nostrdb/src/nip44.c",
+            "nostrdb/src/base64.c",
+            "nostrdb/src/hmac_sha256.c",
+            "nostrdb/src/hkdf_sha256.c",
             "nostrdb/src/binmoji.c",
             "nostrdb/deps/flatcc/src/runtime/json_parser.c",
             "nostrdb/deps/flatcc/src/runtime/verifier.c",
@@ -87,6 +95,15 @@ fn main() {
     //.flag("-Wall")
     //.flag("-Werror")
     //.flag("-g")
+
+    // Provided by libsodium-sys-stable’s build script
+    let sodium_include = std::env::var("DEP_SODIUM_INCLUDE")
+        .expect("DEP_SODIUM_INCLUDE not set; is libsodium-sys-stable a dependency?");
+
+    // Optionally use DEP_SODIUM_LIB as well
+    let sodium_lib_dir = std::env::var("DEP_SODIUM_LIB").ok();
+
+    build.include(&sodium_include);
 
     // Link Security framework on macOS
     if !cfg!(target_os = "windows") {
@@ -118,7 +135,13 @@ fn main() {
 
     build.compile("libnostrdb.a");
 
+    // Make sure the linker knows where libsodium lives
+    if let Some(lib_dir) = sodium_lib_dir {
+        println!("cargo:rustc-link-search=native={lib_dir}");
+    }
+
     println!("cargo:rustc-link-lib=static=nostrdb");
+    println!("cargo:rustc-link-lib=static=sodium");
 
     // Re-run the build script if any of the C files or headers change
     for file in &["nostrdb/src/nostrdb.c", "nostrdb/src/nostrdb.h"] {
