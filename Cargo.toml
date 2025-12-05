@@ -13,7 +13,7 @@ repository = "https://github.com/damus-io/nostrdb-rs/"
 [build-dependencies]
 cc = "1.0"
 bindgen = "0.69.1"
-libsodium-sys-stable = { version = "1.22.5", features = ["optimized", "minimal"] }
+libsodium-sys-stable = { version = "1.22.1", features = ["optimized", "minimal"] }
 
 [features]
 bindgen = []
@@ -25,7 +25,7 @@ thiserror = "2.0.7"
 futures = "0.3.31"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 tracing = "0.1.40"
-libsodium-sys-stable = { version = "1.22.5", features = ["optimized", "minimal"] }
+libsodium-sys-stable = { version = "1.22.1", features = ["optimized", "minimal"] }
 
 [dev-dependencies]
 hex = "0.4.3"
