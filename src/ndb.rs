@@ -1,4 +1,6 @@
+use std::ffi::c_void;
 use std::ffi::CString;
+use std::ops::ControlFlow;
 use std::ptr;
 
 use crate::bindings::ndb_search;
@@ -170,6 +172,311 @@ impl Ndb {
     /// nostrdb can unwrap incoming giftwraps.
     pub fn add_key(&self, key: &[u8; 32]) -> bool {
         unsafe { bindings::ndb_add_key(self.as_ptr(), key as *const u8 as *mut u8) != 0 }
+    }
+
+    /// Count the number of notes matching `filters` within the provided transaction.
+    ///
+    /// This is a convenience wrapper around [`Ndb::fold`]. It visits each note
+    /// yielded by the query and increments a counter.
+    ///
+    /// # Notes
+    /// - Results are evaluated against the snapshot represented by `txn`.
+    /// - Any query failure returns [`Error::QueryError`].
+    pub fn count(&self, txn: &Transaction, filters: &[Filter]) -> Result<usize> {
+        self.fold(txn, filters, 0usize, |acc, _| acc + 1)
+    }
+
+    /// Returns `true` if **all** notes matching `filters` satisfy `pred`.
+    ///
+    /// This is a convenience wrapper around [`Ndb::try_fold`]. It scans
+    /// notes in query order and short-circuits on the first note for which `pred`
+    /// returns `false`.
+    ///
+    /// # Semantics
+    /// - If the query yields **no notes**, this returns `true` (vacuous truth).
+    /// - If `pred(note)` is `false` for any note, the scan stops immediately and
+    ///   returns `Ok(false)`.
+    /// - Otherwise returns `Ok(true)` after visiting all matching notes.
+    ///
+    /// # Notes
+    /// - Results are evaluated against the snapshot represented by `txn`.
+    ///
+    /// # Errors
+    /// Returns [`Error::QueryError`] if the underlying query/visit fails.
+    ///
+    /// # Examples
+    /// Ensure all matching notes are kind 1 and non-empty:
+    /// ```no_run
+    /// # use nostrdb::{Ndb, Transaction, Filter, Result};
+    /// # fn demo(ndb: &Ndb, txn: &Transaction, filters: &[Filter]) -> Result<bool> {
+    /// let ok = ndb.all(txn, filters, |note| !note.content().is_empty())?;
+    /// Ok(ok)
+    /// # }
+    /// ```
+    pub fn all<'txn, P>(
+        &self,
+        txn: &'txn Transaction,
+        filters: &[Filter],
+        mut pred: P,
+    ) -> Result<bool>
+    where
+        P: FnMut(Note<'txn>) -> bool,
+    {
+        self.try_fold(txn, filters, true, |acc, note| {
+            if !pred(note) {
+                ControlFlow::Break(false)
+            } else {
+                ControlFlow::Continue(acc)
+            }
+        })
+    }
+
+    /// Returns `true` if **any** note matching `filters` satisfies `pred`.
+    ///
+    /// This is a convenience wrapper around [`Ndb::try_fold`]. It scans
+    /// notes in query order and short-circuits on the first note for which `pred`
+    /// returns `true`.
+    ///
+    /// # Semantics
+    /// - If the query yields **no notes**, this returns `false`.
+    /// - If `pred(note)` is `true` for any note, the scan stops immediately and
+    ///   returns `Ok(true)`.
+    /// - Otherwise returns `Ok(false)` after visiting all matching notes.
+    ///
+    /// # Notes
+    /// - Results are evaluated against the snapshot represented by `txn`.
+    ///
+    /// # Errors
+    /// Returns [`Error::QueryError`] if the underlying query/visit fails.
+    ///
+    /// # Examples
+    /// Check whether any matching note contains a substring:
+    /// ```no_run
+    /// # use nostrdb::{Ndb, Transaction, Filter, Result};
+    /// # fn demo(ndb: &Ndb, txn: &Transaction, filters: &[Filter]) -> Result<bool> {
+    /// let has_hello = ndb.any(txn, filters, |note| note.content().contains("hello"))?;
+    /// Ok(has_hello)
+    /// # }
+    /// ```
+    pub fn any<'txn, P>(
+        &self,
+        txn: &'txn Transaction,
+        filters: &[Filter],
+        mut pred: P,
+    ) -> Result<bool>
+    where
+        P: FnMut(Note<'txn>) -> bool,
+    {
+        self.try_fold(txn, filters, false, |_acc, note| {
+            if pred(note) {
+                ControlFlow::Break(true)
+            } else {
+                ControlFlow::Continue(false)
+            }
+        })
+    }
+
+    /// Visits notes matching `filters` and returns the first mapped value produced by `f`.
+    ///
+    /// This is the query/visitor analogue of [`Iterator::find_map`]: each matching note is passed
+    /// to `f` in visit order. If `f` returns `Some(T)`, iteration stops immediately and that value
+    /// is returned. If `f` returns `None`, the visitor continues.
+    ///
+    /// # Parameters
+    /// - `txn`: Active transaction used to materialize `Note<'txn>` values.
+    /// - `filters`: Nostr filters applied to the query.
+    /// - `f`: Mapping predicate. Return `Some(value)` to stop early, `None` to keep scanning.
+    ///
+    /// # Returns
+    /// - `Ok(Some(T))` if `f` produced a value for some matching note (and the scan stopped early).
+    /// - `Ok(None)` if no matching note caused `f` to return `Some`.
+    /// - `Err(_)` if the underlying query/visit operation fails.
+    ///
+    /// # Examples
+    /// Get the first event id (as hex) among kind=1 notes:
+    /// ```
+    /// # use nostrdb::{Ndb, Transaction, Filter, Result};
+    /// # fn example(ndb: &Ndb, txn: &Transaction) -> Result<()> {
+    /// let filters = [Filter::new().kinds(vec![1]).build()];
+    /// let id_hex = ndb.find_map(txn, &filters, |note| {
+    ///     Some(hex::encode(note.id()))
+    /// })?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// Find the first note whose content contains a substring and return its key:
+    /// ```
+    /// # use nostrdb::{Ndb, Transaction, Filter, Result, NoteKey};
+    /// # fn example(ndb: &Ndb, txn: &Transaction) -> Result<()> {
+    /// let filters = [Filter::new().kinds(vec![1]).build()];
+    /// let key = ndb.find_map(txn, &filters, |note| {
+    ///     if note.content().contains("hello") {
+    ///         Some(note.key())
+    ///     } else {
+    ///         None
+    ///     }
+    /// })?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn find_map<'txn, T, F>(
+        &self,
+        txn: &'txn Transaction,
+        filters: &[Filter],
+        mut f: F,
+    ) -> Result<Option<T>>
+    where
+        F: FnMut(Note<'txn>) -> Option<T>,
+    {
+        self.try_fold(txn, filters, None, |_acc, note| {
+            if let Some(v) = f(note) {
+                ControlFlow::Break(Some(v))
+            } else {
+                ControlFlow::Continue(None)
+            }
+        })
+    }
+
+    /// Fold over notes matching `filters` within a transaction.
+    ///
+    /// This executes the query and invokes `fold` once per matching note, threading an
+    /// accumulator value through each invocation and returning the final value.
+    ///
+    /// # Errors
+    /// Returns [`Error::QueryError`] if the underlying query/visit fails.
+    ///
+    /// # Examples
+    /// Sum lengths of note contents:
+    /// ```no_run
+    /// # use nostrdb::{Ndb, Transaction, Filter, Result};
+    /// # fn demo(ndb: &Ndb, txn: &Transaction, filters: &[Filter]) -> Result<usize> {
+    /// let total = ndb.fold(txn, filters, 0usize, |acc, note| acc + note.content().len());
+    /// total
+    /// # }
+    /// ```
+    pub fn fold<'txn, B, F>(
+        &self,
+        txn: &'txn Transaction,
+        filters: &[Filter],
+        init: B,
+        fold: F,
+    ) -> Result<B>
+    where
+        F: FnMut(B, Note<'txn>) -> B,
+    {
+        let mut ctx = AggCtx {
+            accum: Some(init),
+            fold,
+            txn,
+        };
+
+        let mut ndb_filters: Vec<bindings::ndb_filter> = filters.iter().map(|f| f.data).collect();
+
+        let ok = unsafe {
+            bindings::ndb_query_visit(
+                txn.as_mut_ptr(),
+                ndb_filters.as_mut_ptr(),
+                ndb_filters.len() as i32,
+                Some(agg_visitor::<'txn, B, F>),
+                (&mut ctx as *mut AggCtx<'txn, B, F>).cast::<c_void>(),
+            )
+        };
+
+        if ok == 1 {
+            Ok(ctx.accum.take().unwrap())
+        } else {
+            Err(Error::QueryError)
+        }
+    }
+
+    /// Fold over notes matching `filters`, with early-exit support.
+    ///
+    /// This is similar to [`Ndb::fold`], but `try_fold` can short-circuit the scan by
+    /// returning [`ControlFlow::Break`]. This is useful for bounded scans, "take until",
+    /// or implementing custom query operators.
+    ///
+    /// # Control flow
+    /// The folding closure returns:
+    /// - `ControlFlow::Continue(next_accum)` to keep scanning
+    /// - `ControlFlow::Break(done)` to stop scanning immediately and return `done`
+    ///
+    /// # Notes
+    /// - Results are evaluated against the snapshot represented by `txn`.
+    /// - Any [`Note<'txn>`] produced during scanning is bound to `txn` and must not outlive it.
+    ///
+    /// # Errors
+    /// Returns [`Error::QueryError`] if the underlying query/visit fails.
+    ///
+    /// # Examples
+    /// Stop after reaching a total content-length budget:
+    /// ```no_run
+    /// # use nostrdb::{Ndb, Transaction, Filter, Result};
+    /// # use std::ops::ControlFlow;
+    /// # fn demo(ndb: &Ndb, txn: &Transaction, filters: &[Filter]) -> Result<usize> {
+    /// let budget = 1024usize;
+    /// let total = ndb.try_fold(txn, filters, 0usize, |acc, note| {
+    ///     let next = acc + note.content().len();
+    ///     if next >= budget {
+    ///         ControlFlow::Break(next)
+    ///     } else {
+    ///         ControlFlow::Continue(next)
+    ///     }
+    /// })?;
+    /// Ok(total)
+    /// # }
+    /// ```
+    ///
+    /// Collect up to `N` notes and stop early:
+    /// ```no_run
+    /// # use nostrdb::{Ndb, Transaction, Filter, Note, Result};
+    /// # use std::ops::ControlFlow;
+    /// # fn demo<'txn>(ndb: &Ndb, txn: &'txn Transaction, filters: &[Filter]) -> Result<Vec<Note<'txn>>> {
+    /// let limit = 10usize;
+    /// let notes = ndb.try_fold(txn, filters, Vec::new(), |mut acc, note| {
+    ///     acc.push(note);
+    ///     if acc.len() >= limit {
+    ///         ControlFlow::Break(acc)
+    ///     } else {
+    ///         ControlFlow::Continue(acc)
+    ///     }
+    /// })?;
+    /// Ok(notes)
+    /// # }
+    /// ```
+    pub fn try_fold<'txn, B, F>(
+        &self,
+        txn: &'txn Transaction,
+        filters: &[Filter],
+        init: B,
+        fold: F,
+    ) -> Result<B>
+    where
+        F: FnMut(B, Note<'txn>) -> ControlFlow<B, B>,
+    {
+        let mut ctx = AggCtx {
+            accum: Some(init),
+            fold,
+            txn,
+        };
+
+        let mut ndb_filters: Vec<bindings::ndb_filter> = filters.iter().map(|f| f.data).collect();
+
+        let ok = unsafe {
+            bindings::ndb_query_visit(
+                txn.as_mut_ptr(),
+                ndb_filters.as_mut_ptr(),
+                ndb_filters.len() as i32,
+                Some(agg_visitor_control::<'txn, B, F>),
+                (&mut ctx as *mut AggCtx<'txn, B, F>).cast::<c_void>(),
+            )
+        };
+
+        if ok == 1 {
+            Ok(ctx.accum.take().unwrap())
+        } else {
+            Err(Error::QueryError)
+        }
     }
 
     pub fn query<'a>(
@@ -524,6 +831,90 @@ impl Ndb {
     }
 }
 
+struct AggCtx<'txn, B, F> {
+    accum: Option<B>,
+    fold: F,
+    txn: &'txn Transaction,
+}
+
+/// FFI visitor for [`Ndb::fold`].
+///
+/// This callback:
+/// 1) Reconstructs the Rust `AggCtx` from the opaque pointer.
+/// 2) Wraps the raw query result into a transactional `Note<'txn>`.
+/// 3) Applies `fold` to update the accumulator.
+/// 4) Always returns `NDB_VISITOR_CONT`.
+///
+/// # Safety
+/// - `ctx` must point to a valid `AggCtx<'txn, B, F>` created by `fold`.
+/// - `res` must be valid for the duration of this callback invocation.
+/// - The constructed `Note<'txn>` must not escape this callback.
+unsafe extern "C" fn agg_visitor<'txn, B, F>(
+    ctx: *mut c_void,
+    res: *mut bindings::ndb_query_result,
+) -> bindings::ndb_visitor_action
+where
+    F: FnMut(B, Note<'txn>) -> B,
+{
+    let ctx = &mut *(ctx as *mut AggCtx<'txn, B, F>);
+    let res = &*res;
+
+    let note = Note::new_transactional(
+        res.note,
+        res.note_size as usize,
+        NoteKey::new(res.note_id),
+        ctx.txn,
+    );
+
+    let prev = ctx.accum.take().expect("accumulator missing");
+    let next = (ctx.fold)(prev, note);
+    ctx.accum = Some(next);
+
+    bindings::ndb_visitor_action_NDB_VISITOR_CONT
+}
+
+/// FFI visitor for [`Ndb::try_fold`].
+///
+/// Same as [`agg_visitor`], but supports early termination by mapping:
+/// - `ControlFlow::Continue(_)` => `NDB_VISITOR_CONT`
+/// - `ControlFlow::Break(_)`    => `NDB_VISITOR_STOP`
+///
+/// # Safety
+/// See [`agg_visitor`] for the core contract.
+unsafe extern "C" fn agg_visitor_control<'txn, B, F>(
+    ctx: *mut c_void,
+    res: *mut bindings::ndb_query_result,
+) -> bindings::ndb_visitor_action
+where
+    F: FnMut(B, Note<'txn>) -> ControlFlow<B, B>,
+{
+    // SAFETY: ctx is a valid AggCtx for the duration of ndb_query_visit.
+    let ctx = &mut *(ctx as *mut AggCtx<'txn, B, F>);
+    // SAFETY: res is valid for the duration of this callback per ndb_query_visit contract.
+    let res = &*res;
+
+    // Turn the raw C result into your Rust Note wrapper.
+    // This assumes Note::from_raw borrows from res.note for the callback duration.
+    let note = Note::new_transactional(
+        res.note,
+        res.note_size as usize,
+        NoteKey::new(res.note_id),
+        ctx.txn,
+    );
+
+    let prev = ctx.accum.take().expect("accum missing");
+    match (ctx.fold)(prev, note) {
+        ControlFlow::Continue(next) => {
+            ctx.accum = Some(next);
+            bindings::ndb_visitor_action_NDB_VISITOR_CONT
+        }
+        ControlFlow::Break(done) => {
+            ctx.accum = Some(done);
+            bindings::ndb_visitor_action_NDB_VISITOR_STOP
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -539,6 +930,116 @@ mod tests {
         {
             let cfg = Config::new();
             let _ = Ndb::new(db, &cfg).expect("ok");
+        }
+    }
+
+    #[tokio::test]
+    async fn count_works() {
+        let db = "target/testdbs/count";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+
+            let filter = Filter::new().kinds(vec![1]).build();
+            let filters = vec![filter];
+
+            let sub = ndb.subscribe(&filters).expect("sub_id");
+            let waiter = ndb.wait_for_notes(sub, 2);
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+            ndb.process_event(r#"["EVENT","b",{"id":"2e577580420c4ef02e8067aa842dd068be7c957f81a32b325fa1849b1650d98b","pubkey":"e586b8d54cfecacf251c71d0b2d9b01673c8870fb3fe82a20ce5afc44ce7fccc","created_at":1768414963,"kind":1,"tags":[],"content":"hi","sig":"662d45856ffc66c32df33ce5e8b7b9de14981774679b36bdb787bb8feda22b47eee7257756b915f7d54a53317151b0907a40847c635c9626debfb2a7b038c76f"}]"#).expect("process ok");
+            let _ = waiter.await.expect("await ok");
+            let txn = Transaction::new(&ndb).expect("txn");
+            let res = ndb.count(&txn, &filters).expect("query ok");
+            assert_eq!(res, 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn fold_works() {
+        let db = "target/testdbs/fold_content_len";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+
+            let filter = Filter::new().kinds(vec![1]).build();
+            let filters = vec![filter];
+
+            let sub = ndb.subscribe(&filters).expect("sub_id");
+            let waiter = ndb.wait_for_notes(sub, 2);
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+            ndb.process_event(r#"["EVENT","b",{"id":"2e577580420c4ef02e8067aa842dd068be7c957f81a32b325fa1849b1650d98b","pubkey":"e586b8d54cfecacf251c71d0b2d9b01673c8870fb3fe82a20ce5afc44ce7fccc","created_at":1768414963,"kind":1,"tags":[],"content":"hi","sig":"662d45856ffc66c32df33ce5e8b7b9de14981774679b36bdb787bb8feda22b47eee7257756b915f7d54a53317151b0907a40847c635c9626debfb2a7b038c76f"}]"#).expect("process ok");
+            let _ = waiter.await.expect("await ok");
+            let txn = Transaction::new(&ndb).expect("txn");
+            let total = ndb
+                .fold(&txn, &filters, 0usize, |acc, note| {
+                    acc + note.content().len()
+                })
+                .unwrap();
+            assert_eq!(total, 14);
+        }
+    }
+
+    #[tokio::test]
+    async fn try_fold_works() {
+        let db = "target/testdbs/try_fold_works";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+
+            let filter = Filter::new().kinds(vec![1]).build();
+            let filters = vec![filter];
+
+            let sub = ndb.subscribe(&filters).expect("sub_id");
+            let waiter = ndb.wait_for_notes(sub, 2);
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+            ndb.process_event(r#"["EVENT","b",{"id":"2e577580420c4ef02e8067aa842dd068be7c957f81a32b325fa1849b1650d98b","pubkey":"e586b8d54cfecacf251c71d0b2d9b01673c8870fb3fe82a20ce5afc44ce7fccc","created_at":1768414963,"kind":1,"tags":[],"content":"hi","sig":"662d45856ffc66c32df33ce5e8b7b9de14981774679b36bdb787bb8feda22b47eee7257756b915f7d54a53317151b0907a40847c635c9626debfb2a7b038c76f"}]"#).expect("process ok");
+            let _ = waiter.await.expect("await ok");
+            let txn = Transaction::new(&ndb).expect("txn");
+            let note = ndb
+                .try_fold(&txn, &filters, None, |_acc, note| {
+                    if note.content() == "hi" {
+                        ControlFlow::Break(Some(note))
+                    } else {
+                        ControlFlow::Continue(None)
+                    }
+                })
+                .unwrap()
+                .unwrap();
+            assert_eq!(note.content(), "hi");
+        }
+    }
+
+    #[tokio::test]
+    async fn find_map_works() {
+        let db = "target/testdbs/first_works";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+
+            let filter = Filter::new().kinds(vec![1]).build();
+            let filters = vec![filter];
+
+            let sub = ndb.subscribe(&filters).expect("sub_id");
+            let waiter = ndb.wait_for_notes(sub, 2);
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+            ndb.process_event(r#"["EVENT","b",{"id":"2e577580420c4ef02e8067aa842dd068be7c957f81a32b325fa1849b1650d98b","pubkey":"e586b8d54cfecacf251c71d0b2d9b01673c8870fb3fe82a20ce5afc44ce7fccc","created_at":1768414963,"kind":1,"tags":[],"content":"hi","sig":"662d45856ffc66c32df33ce5e8b7b9de14981774679b36bdb787bb8feda22b47eee7257756b915f7d54a53317151b0907a40847c635c9626debfb2a7b038c76f"}]"#).expect("process ok");
+            let _ = waiter.await.expect("await ok");
+            let txn = Transaction::new(&ndb).expect("txn");
+            let note = ndb
+                .find_map(&txn, &filters, |note| {
+                    if note.content().contains("world") {
+                        Some(note)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap()
+                .unwrap();
+            assert_eq!(note.content(), "hello, world");
         }
     }
 
