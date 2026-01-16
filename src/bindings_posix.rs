@@ -2969,6 +2969,64 @@ pub type ndb_sub_fn =
     ::std::option::Option<unsafe extern "C" fn(arg1: *mut ::std::os::raw::c_void, subid: u64)>;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct ndb_query_result {
+    pub note: *mut ndb_note,
+    pub note_size: u64,
+    pub note_id: u64,
+}
+#[test]
+fn bindgen_test_layout_ndb_query_result() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_query_result> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_query_result>(),
+        24usize,
+        concat!("Size of: ", stringify!(ndb_query_result))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_query_result>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_query_result))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).note) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_result),
+            "::",
+            stringify!(note)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).note_size) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_result),
+            "::",
+            stringify!(note_size)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).note_id) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_result),
+            "::",
+            stringify!(note_id)
+        )
+    );
+}
+pub type ndb_visitor_fn = ::std::option::Option<
+    unsafe extern "C" fn(
+        ctx: *mut ::std::os::raw::c_void,
+        res: *mut ndb_query_result,
+    ) -> ndb_visitor_action,
+>;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct ndb_id_cb {
     pub fn_: ndb_id_fn,
     pub data: *mut ::std::os::raw::c_void,
@@ -5274,58 +5332,12 @@ fn bindgen_test_layout_ndb_block_iterator() {
         )
     );
 }
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct ndb_query_result {
-    pub note: *mut ndb_note,
-    pub note_size: u64,
-    pub note_id: u64,
-}
-#[test]
-fn bindgen_test_layout_ndb_query_result() {
-    const UNINIT: ::std::mem::MaybeUninit<ndb_query_result> = ::std::mem::MaybeUninit::uninit();
-    let ptr = UNINIT.as_ptr();
-    assert_eq!(
-        ::std::mem::size_of::<ndb_query_result>(),
-        24usize,
-        concat!("Size of: ", stringify!(ndb_query_result))
-    );
-    assert_eq!(
-        ::std::mem::align_of::<ndb_query_result>(),
-        8usize,
-        concat!("Alignment of ", stringify!(ndb_query_result))
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).note) as usize - ptr as usize },
-        0usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(ndb_query_result),
-            "::",
-            stringify!(note)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).note_size) as usize - ptr as usize },
-        8usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(ndb_query_result),
-            "::",
-            stringify!(note_size)
-        )
-    );
-    assert_eq!(
-        unsafe { ::std::ptr::addr_of!((*ptr).note_id) as usize - ptr as usize },
-        16usize,
-        concat!(
-            "Offset of field: ",
-            stringify!(ndb_query_result),
-            "::",
-            stringify!(note_id)
-        )
-    );
-}
+pub const ndb_query_type_NDB_QUERY_TYPE_STANDARD: ndb_query_type = 1;
+pub const ndb_query_type_NDB_QUERY_TYPE_VISITOR: ndb_query_type = 2;
+pub type ndb_query_type = ::std::os::raw::c_uint;
+pub const ndb_visitor_action_NDB_VISITOR_STOP: ndb_visitor_action = 0;
+pub const ndb_visitor_action_NDB_VISITOR_CONT: ndb_visitor_action = 1;
+pub type ndb_visitor_action = i32;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ndb_query_results {
@@ -5353,6 +5365,208 @@ fn bindgen_test_layout_ndb_query_results() {
             stringify!(ndb_query_results),
             "::",
             stringify!(cur)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct ndb_query_state {
+    pub type_: ndb_query_type,
+    pub limit: u64,
+    pub __bindgen_anon_1: ndb_query_state__bindgen_ty_1,
+}
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union ndb_query_state__bindgen_ty_1 {
+    pub query: ndb_query_state__bindgen_ty_1__bindgen_ty_1,
+    pub visitor: ndb_query_state__bindgen_ty_1__bindgen_ty_2,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_query_state__bindgen_ty_1__bindgen_ty_1 {
+    pub capacity: ::std::os::raw::c_int,
+    pub results: ndb_query_results,
+}
+#[test]
+fn bindgen_test_layout_ndb_query_state__bindgen_ty_1__bindgen_ty_1() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_query_state__bindgen_ty_1__bindgen_ty_1> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_query_state__bindgen_ty_1__bindgen_ty_1>(),
+        32usize,
+        concat!(
+            "Size of: ",
+            stringify!(ndb_query_state__bindgen_ty_1__bindgen_ty_1)
+        )
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_query_state__bindgen_ty_1__bindgen_ty_1>(),
+        8usize,
+        concat!(
+            "Alignment of ",
+            stringify!(ndb_query_state__bindgen_ty_1__bindgen_ty_1)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).capacity) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_state__bindgen_ty_1__bindgen_ty_1),
+            "::",
+            stringify!(capacity)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).results) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_state__bindgen_ty_1__bindgen_ty_1),
+            "::",
+            stringify!(results)
+        )
+    );
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ndb_query_state__bindgen_ty_1__bindgen_ty_2 {
+    pub visited: u64,
+    pub ctx: *mut ::std::os::raw::c_void,
+    pub done: ::std::os::raw::c_int,
+    pub visitor: ndb_visitor_fn,
+}
+#[test]
+fn bindgen_test_layout_ndb_query_state__bindgen_ty_1__bindgen_ty_2() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_query_state__bindgen_ty_1__bindgen_ty_2> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_query_state__bindgen_ty_1__bindgen_ty_2>(),
+        32usize,
+        concat!(
+            "Size of: ",
+            stringify!(ndb_query_state__bindgen_ty_1__bindgen_ty_2)
+        )
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_query_state__bindgen_ty_1__bindgen_ty_2>(),
+        8usize,
+        concat!(
+            "Alignment of ",
+            stringify!(ndb_query_state__bindgen_ty_1__bindgen_ty_2)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).visited) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_state__bindgen_ty_1__bindgen_ty_2),
+            "::",
+            stringify!(visited)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).ctx) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_state__bindgen_ty_1__bindgen_ty_2),
+            "::",
+            stringify!(ctx)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).done) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_state__bindgen_ty_1__bindgen_ty_2),
+            "::",
+            stringify!(done)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).visitor) as usize - ptr as usize },
+        24usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_state__bindgen_ty_1__bindgen_ty_2),
+            "::",
+            stringify!(visitor)
+        )
+    );
+}
+#[test]
+fn bindgen_test_layout_ndb_query_state__bindgen_ty_1() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_query_state__bindgen_ty_1> =
+        ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_query_state__bindgen_ty_1>(),
+        32usize,
+        concat!("Size of: ", stringify!(ndb_query_state__bindgen_ty_1))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_query_state__bindgen_ty_1>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_query_state__bindgen_ty_1))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).query) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_state__bindgen_ty_1),
+            "::",
+            stringify!(query)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).visitor) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_state__bindgen_ty_1),
+            "::",
+            stringify!(visitor)
+        )
+    );
+}
+#[test]
+fn bindgen_test_layout_ndb_query_state() {
+    const UNINIT: ::std::mem::MaybeUninit<ndb_query_state> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<ndb_query_state>(),
+        48usize,
+        concat!("Size of: ", stringify!(ndb_query_state))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<ndb_query_state>(),
+        8usize,
+        concat!("Alignment of ", stringify!(ndb_query_state))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).type_) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_state),
+            "::",
+            stringify!(type_)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).limit) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(ndb_query_state),
+            "::",
+            stringify!(limit)
         )
     );
 }
@@ -5863,6 +6077,15 @@ extern "C" {
         results: *mut ndb_query_result,
         result_capacity: ::std::os::raw::c_int,
         count: *mut ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_query_visit(
+        txn: *mut ndb_txn,
+        filters: *mut ndb_filter,
+        num_filters: ::std::os::raw::c_int,
+        visitor: ndb_visitor_fn,
+        ctx: *mut ::std::os::raw::c_void,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
