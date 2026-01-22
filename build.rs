@@ -1,7 +1,7 @@
 // build.rs
 use cc::Build;
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn secp256k1_build(base_config: &mut Build) {
     // Actual build
@@ -29,6 +29,10 @@ fn secp256k1_build(base_config: &mut Build) {
         .file("nostrdb/deps/secp256k1/src/precomputed_ecmult_gen.c")
         .file("nostrdb/deps/secp256k1/src/precomputed_ecmult.c")
         .file("nostrdb/deps/secp256k1/src/secp256k1.c");
+
+    // libsodium
+    //base_config
+    //.file("nostrdb/deps/libsodium/src/libsodium/crypto_stream/chacha20/stream_chacha20.c");
 
     if env::var("PROFILE").unwrap() == "debug" {
         base_config.flag("-O1");
@@ -69,6 +73,10 @@ fn main() {
             "nostrdb/src/bolt11/bech32.c",
             "nostrdb/src/block.c",
             "nostrdb/src/metadata.c",
+            "nostrdb/src/nip44.c",
+            "nostrdb/src/base64.c",
+            "nostrdb/src/hmac_sha256.c",
+            "nostrdb/src/hkdf_sha256.c",
             "nostrdb/src/binmoji.c",
             "nostrdb/deps/flatcc/src/runtime/json_parser.c",
             "nostrdb/deps/flatcc/src/runtime/verifier.c",
@@ -87,6 +95,46 @@ fn main() {
     //.flag("-Wall")
     //.flag("-Werror")
     //.flag("-g")
+
+    {
+        // Provided by libsodium-sys-stable’s build script
+        let dep_include = std::env::var("DEP_SODIUM_INCLUDE")
+            .expect("DEP_SODIUM_INCLUDE not set; is libsodium-sys-stable a dependency?");
+
+        let dep_include_path = Path::new(&dep_include);
+
+        // If DEP_SODIUM_INCLUDE doesn't directly contain `sodium/`, try the known Windows layout:
+        //   <...>/out/installed/libsodium/include
+        let mut include_root = dep_include_path.to_path_buf();
+
+        if !include_root.join("sodium").is_dir() {
+            // try sibling layout relative to the libsodium build output
+            // (DEP_SODIUM_INCLUDE is often <...>/out/installed/include on Windows)
+            let candidate = dep_include_path
+                .parent() // <...>/out/installed
+                .unwrap_or(dep_include_path)
+                .join("libsodium")
+                .join("include");
+
+            if candidate.join("sodium").is_dir() {
+                include_root = candidate;
+            }
+        }
+
+        build.include(include_root);
+
+        // static libsodium on MSVC: avoid __imp_ dllimport mismatch
+        if cfg!(target_env = "msvc") {
+            build.define("SODIUM_STATIC", Some("1"));
+        }
+
+        // Optionally use DEP_SODIUM_LIB as well
+        let sodium_lib_dir = std::env::var("DEP_SODIUM_LIB").ok();
+        // Make sure the linker knows where libsodium lives
+        if let Some(lib_dir) = sodium_lib_dir {
+            println!("cargo:rustc-link-search=native={lib_dir}");
+        }
+    }
 
     // Link Security framework on macOS
     if !cfg!(target_os = "windows") {
@@ -117,6 +165,15 @@ fn main() {
     secp256k1_build(&mut build);
 
     build.compile("libnostrdb.a");
+    build.define("SODIUM_STATIC", Some("1"));
+
+    {
+        let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+        let is_windows = target_env == "msvc";
+        let sodium_name = if is_windows { "libsodium" } else { "sodium" };
+
+        println!("cargo:rustc-link-lib=static={sodium_name}");
+    }
 
     println!("cargo:rustc-link-lib=static=nostrdb");
 

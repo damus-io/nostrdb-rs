@@ -353,6 +353,9 @@ pub const EWOULDBLOCK: u32 = 140;
 pub const _NLSCMPERROR: u32 = 2147483647;
 pub const NDB_PACKED_STR: u32 = 1;
 pub const NDB_PACKED_ID: u32 = 2;
+pub const NDB_NOTE_FLAG_DELETED: u32 = 1;
+pub const NDB_NOTE_FLAG_RUMOR: u32 = 2;
+pub const NDB_NOTE_FLAG_UNWRAPPED: u32 = 4;
 pub const NDB_FLAG_NOMIGRATE: u32 = 1;
 pub const NDB_FLAG_SKIP_NOTE_VERIFY: u32 = 2;
 pub const NDB_FLAG_NO_FULLTEXT: u32 = 4;
@@ -2505,6 +2508,140 @@ pub const ndb_metadata_type_NDB_NOTE_META_RESERVED: ndb_metadata_type = 0;
 pub const ndb_metadata_type_NDB_NOTE_META_COUNTS: ndb_metadata_type = 100;
 pub const ndb_metadata_type_NDB_NOTE_META_REACTION: ndb_metadata_type = 200;
 pub type ndb_metadata_type = ::std::os::raw::c_int;
+pub const ndb_decrypt_result_NIP44_OK: ndb_decrypt_result = 0;
+pub const ndb_decrypt_result_NIP44_ERR_UNSUPPORTED_ENCODING: ndb_decrypt_result = 1;
+pub const ndb_decrypt_result_NIP44_ERR_INVALID_PAYLOAD: ndb_decrypt_result = 2;
+pub const ndb_decrypt_result_NIP44_ERR_BASE64_DECODE: ndb_decrypt_result = 3;
+pub const ndb_decrypt_result_NIP44_ERR_SECKEY_VERIFY_FAILED: ndb_decrypt_result = 4;
+pub const ndb_decrypt_result_NIP44_ERR_PUBKEY_PARSE_FAILED: ndb_decrypt_result = 5;
+pub const ndb_decrypt_result_NIP44_ERR_ECDH_FAILED: ndb_decrypt_result = 6;
+pub const ndb_decrypt_result_NIP44_ERR_FILL_RANDOM_FAILED: ndb_decrypt_result = 7;
+pub const ndb_decrypt_result_NIP44_ERR_INVALID_MAC: ndb_decrypt_result = 8;
+pub const ndb_decrypt_result_NIP44_ERR_INVALID_PADDING: ndb_decrypt_result = 9;
+pub const ndb_decrypt_result_NIP44_ERR_BUFFER_TOO_SMALL: ndb_decrypt_result = 10;
+pub type ndb_decrypt_result = ::std::os::raw::c_int;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct nip44_payload {
+    pub version: ::std::os::raw::c_uchar,
+    pub nonce: *mut ::std::os::raw::c_uchar,
+    pub ciphertext: *mut ::std::os::raw::c_uchar,
+    pub ciphertext_len: usize,
+    pub mac: *mut ::std::os::raw::c_uchar,
+}
+#[test]
+fn bindgen_test_layout_nip44_payload() {
+    const UNINIT: ::std::mem::MaybeUninit<nip44_payload> = ::std::mem::MaybeUninit::uninit();
+    let ptr = UNINIT.as_ptr();
+    assert_eq!(
+        ::std::mem::size_of::<nip44_payload>(),
+        40usize,
+        concat!("Size of: ", stringify!(nip44_payload))
+    );
+    assert_eq!(
+        ::std::mem::align_of::<nip44_payload>(),
+        8usize,
+        concat!("Alignment of ", stringify!(nip44_payload))
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).version) as usize - ptr as usize },
+        0usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nip44_payload),
+            "::",
+            stringify!(version)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).nonce) as usize - ptr as usize },
+        8usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nip44_payload),
+            "::",
+            stringify!(nonce)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).ciphertext) as usize - ptr as usize },
+        16usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nip44_payload),
+            "::",
+            stringify!(ciphertext)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).ciphertext_len) as usize - ptr as usize },
+        24usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nip44_payload),
+            "::",
+            stringify!(ciphertext_len)
+        )
+    );
+    assert_eq!(
+        unsafe { ::std::ptr::addr_of!((*ptr).mac) as usize - ptr as usize },
+        32usize,
+        concat!(
+            "Offset of field: ",
+            stringify!(nip44_payload),
+            "::",
+            stringify!(mac)
+        )
+    );
+}
+extern "C" {
+    pub fn nip44_decrypt(
+        secp_context: *mut ::std::os::raw::c_void,
+        sender_pubkey: *const ::std::os::raw::c_uchar,
+        receiver_seckey: *const ::std::os::raw::c_uchar,
+        payload: *const ::std::os::raw::c_char,
+        payload_len: ::std::os::raw::c_int,
+        buf: *mut ::std::os::raw::c_uchar,
+        bufsize: usize,
+        decrypted: *mut *mut ::std::os::raw::c_uchar,
+        decrypted_len: *mut u16,
+    ) -> ndb_decrypt_result;
+}
+extern "C" {
+    pub fn nip44_encrypt(
+        secp: *mut ::std::os::raw::c_void,
+        sender_seckey: *const ::std::os::raw::c_uchar,
+        receiver_pubkey: *const ::std::os::raw::c_uchar,
+        plaintext: *const ::std::os::raw::c_uchar,
+        plaintext_size: u16,
+        buf: *mut ::std::os::raw::c_uchar,
+        bufsize: usize,
+        out: *mut *mut ::std::os::raw::c_char,
+        out_len: *mut isize,
+    ) -> ndb_decrypt_result;
+}
+extern "C" {
+    pub fn nip44_decrypt_raw(
+        secp: *mut ::std::os::raw::c_void,
+        sender_pubkey: *const ::std::os::raw::c_uchar,
+        receiver_seckey: *const ::std::os::raw::c_uchar,
+        decoded: *mut nip44_payload,
+        decrypted: *mut *mut ::std::os::raw::c_uchar,
+        decrypted_len: *mut u16,
+    ) -> ndb_decrypt_result;
+}
+extern "C" {
+    pub fn nip44_decode_payload(
+        decoded: *mut nip44_payload,
+        buf: *mut ::std::os::raw::c_uchar,
+        bufsize: usize,
+        payload: *const ::std::os::raw::c_char,
+        payload_len: usize,
+    ) -> ndb_decrypt_result;
+}
+extern "C" {
+    pub fn nip44_err_msg(res: ndb_decrypt_result) -> *const ::std::os::raw::c_char;
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ndb_tag_ptr {
@@ -5439,6 +5576,9 @@ extern "C" {
     pub fn ndb_db_version(txn: *mut ndb_txn) -> ::std::os::raw::c_int;
 }
 extern "C" {
+    pub fn ndb_add_key(ndb: *mut ndb, key: *mut ::std::os::raw::c_uchar) -> ::std::os::raw::c_int;
+}
+extern "C" {
     pub fn ndb_process_event(
         arg1: *mut ndb,
         json: *const ::std::os::raw::c_char,
@@ -5466,6 +5606,9 @@ extern "C" {
         ldjson: *const ::std::os::raw::c_char,
         len: usize,
     ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_process_giftwraps(arg1: *mut ndb, arg2: *mut ndb_txn) -> ::std::os::raw::c_int;
 }
 extern "C" {
     pub fn ndb_process_events_with(
@@ -5599,6 +5742,16 @@ extern "C" {
         arg1: *mut *mut ndb_note,
         buf: *mut ::std::os::raw::c_uchar,
         buflen: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_note_from_json_custom(
+        json: *const ::std::os::raw::c_char,
+        len: ::std::os::raw::c_int,
+        arg1: *mut *mut ndb_note,
+        buf: *mut ::std::os::raw::c_uchar,
+        buflen: ::std::os::raw::c_int,
+        parse_cond: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
@@ -6019,6 +6172,18 @@ extern "C" {
 }
 extern "C" {
     pub fn ndb_str_len(str_: *mut ndb_str) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_note_flags(arg1: *mut ndb_note) -> *mut u16;
+}
+extern "C" {
+    pub fn ndb_note_is_rumor(note: *mut ndb_note) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    pub fn ndb_note_rumor_receiver_pubkey(note: *mut ndb_note) -> *mut ::std::os::raw::c_uchar;
+}
+extern "C" {
+    pub fn ndb_note_rumor_giftwrap_id(note: *mut ndb_note) -> *mut ::std::os::raw::c_uchar;
 }
 extern "C" {
     #[doc = " write the note as json to a buffer"]
@@ -6543,6 +6708,9 @@ fn bindgen_test_layout_ndb_note_meta() {
         )
     );
 }
+pub const ndb_note_meta_flags_NDB_NOTE_META_FLAG_DELETED: ndb_note_meta_flags = 0;
+pub const ndb_note_meta_flags_NDB_NOTE_META_FLAG_SEEN: ndb_note_meta_flags = 2;
+pub type ndb_note_meta_flags = ::std::os::raw::c_int;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct __crt_locale_data {

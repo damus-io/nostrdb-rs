@@ -189,6 +189,43 @@ impl<'a> Note<'a> {
     }
 
     #[inline]
+    pub fn flags(&self) -> u16 {
+        unsafe { *bindings::ndb_note_flags(self.as_ptr()) }
+    }
+
+    #[inline]
+    pub fn is_rumor(&self) -> bool {
+        (self.flags() & (bindings::NDB_NOTE_FLAG_RUMOR as u16))
+            == bindings::NDB_NOTE_FLAG_RUMOR as u16
+    }
+
+    #[inline]
+    pub fn rumor_giftwrap_id(&self) -> Option<&'a [u8; 32]> {
+        unsafe {
+            let ptr = bindings::ndb_note_rumor_giftwrap_id(self.as_ptr());
+
+            if ptr.is_null() {
+                return None;
+            }
+
+            Some(&*(ptr as *const [u8; 32]))
+        }
+    }
+
+    #[inline]
+    pub fn rumor_receiver_pubkey(&self) -> Option<&'a [u8; 32]> {
+        unsafe {
+            let ptr = bindings::ndb_note_rumor_receiver_pubkey(self.as_ptr());
+
+            if ptr.is_null() {
+                return None;
+            }
+
+            Some(&*(ptr as *const [u8; 32]))
+        }
+    }
+
+    #[inline]
     pub fn as_ptr(&self) -> *mut bindings::ndb_note {
         match self {
             Note::Owned { ptr, .. } => *ptr,
@@ -623,6 +660,9 @@ mod tests {
 
         let json = note.json().expect("note json");
         // the signature changes so 267 is everything up until the signature
-        assert_eq!(&json[..267], "{\"id\":\"fb165be22c7b2518b749aabb7140c73f0887fe84475c82785700663be85ba859\",\"pubkey\":\"6c540ed060bfc2b0c5b6f09cd3ebedf980ef7bc836d69582361d20f2ad124f23\",\"created_at\":42,\"kind\":1,\"tags\":[[\"comment\",\"this is a comment\"],[\"blah\",\"something\"]],\"content\":\"this is the content\"");
+        assert_eq!(
+            &json[..267],
+            "{\"id\":\"fb165be22c7b2518b749aabb7140c73f0887fe84475c82785700663be85ba859\",\"pubkey\":\"6c540ed060bfc2b0c5b6f09cd3ebedf980ef7bc836d69582361d20f2ad124f23\",\"created_at\":42,\"kind\":1,\"tags\":[[\"comment\",\"this is a comment\"],[\"blah\",\"something\"]],\"content\":\"this is the content\""
+        );
     }
 }

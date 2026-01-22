@@ -159,6 +159,19 @@ impl Ndb {
         self.process_event_with(json, IngestMetadata::new().client(true))
     }
 
+    /// Attempt to unwrap any unprocessed giftwraps
+    pub fn process_giftwraps(&self, txn: &Transaction) {
+        unsafe {
+            bindings::ndb_process_giftwraps(self.as_ptr(), txn.as_mut_ptr());
+        }
+    }
+
+    /// Add a secret key to nostrdb's note ingester threads so that
+    /// nostrdb can unwrap incoming giftwraps.
+    pub fn add_key(&self, key: &[u8; 32]) -> bool {
+        unsafe { bindings::ndb_add_key(self.as_ptr(), key as *const u8 as *mut u8) != 0 }
+    }
+
     pub fn query<'a>(
         &self,
         txn: &'a Transaction,
