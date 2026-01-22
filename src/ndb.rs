@@ -36,7 +36,7 @@ impl Drop for NdbRef {
 
             if !self.rust_cb_ctx.is_null() {
                 // Rebuild the Box from the raw pointer and drop it.
-                let _ = Box::from_raw(self.rust_cb_ctx as *mut Box<dyn FnMut()>);
+                let _ = Box::from_raw(self.rust_cb_ctx as *mut Box<dyn FnMut(u64)>);
             }
         }
     }
