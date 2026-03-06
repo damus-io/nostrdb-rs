@@ -1516,7 +1516,7 @@ mod tests {
             0xe8, 0x5b, 0xa8, 0x59,
         ];
 
-        let note = NoteBuilder::new()
+        let note_buf = NoteBuilder::new()
             .kind(1)
             .content("this is the content")
             .created_at(42)
@@ -1529,6 +1529,8 @@ mod tests {
             .sign(&seckey)
             .build()
             .expect("expected build to work");
+
+        let note = note_buf.as_note();
 
         {
             let filter = Filter::new().custom(|n| n.created_at() == 43).build();

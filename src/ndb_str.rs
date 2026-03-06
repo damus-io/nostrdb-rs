@@ -1,8 +1,10 @@
-use crate::{bindings, Note};
+use crate::bindings;
+use std::marker::PhantomData;
 
 pub struct NdbStr<'a> {
     ndb_str: bindings::ndb_str,
-    note: Note<'a>,
+    _note_ptr: *mut bindings::ndb_note,
+    _marker: PhantomData<&'a ()>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -38,12 +40,12 @@ impl bindings::ndb_str {
 }
 
 impl<'a> NdbStr<'a> {
-    pub fn note(&self) -> &Note<'a> {
-        &self.note
-    }
-
-    pub(crate) fn new(ndb_str: bindings::ndb_str, note: Note<'a>) -> Self {
-        NdbStr { ndb_str, note }
+    pub(crate) fn new(ndb_str: bindings::ndb_str, note_ptr: *mut bindings::ndb_note) -> Self {
+        NdbStr {
+            ndb_str,
+            _note_ptr: note_ptr,
+            _marker: PhantomData,
+        }
     }
 
     pub fn is_empty(&self) -> bool {

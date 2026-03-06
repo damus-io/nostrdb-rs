@@ -1,6 +1,36 @@
 use crate::{bindings, tags::Tags, transaction::Transaction, Error, NoteRelays};
 use std::{hash::Hash, os::raw::c_uchar};
 
+/// Heap-owned note buffer. Not Clone.
+/// Use `.as_note()` to get a borrowing `Note<'_>`.
+#[derive(Debug)]
+pub struct NoteBuf {
+    ptr: *mut bindings::ndb_note,
+    size: usize,
+}
+
+impl NoteBuf {
+    pub fn as_note(&self) -> Note<'_> {
+        Note::Unowned {
+            ptr: unsafe { &*self.ptr },
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    pub fn as_ptr(&self) -> *mut bindings::ndb_note {
+        self.ptr
+    }
+}
+
+impl Drop for NoteBuf {
+    fn drop(&mut self) {
+        unsafe { libc::free(self.ptr as *mut libc::c_void) }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub struct NoteKey(u64);
 
@@ -43,19 +73,9 @@ impl<'a> NoteBuildOptions<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Note<'a> {
-    /// A note in-memory outside of nostrdb. This note is a pointer to a note in
-    /// memory and will be free'd when [Drop]ped. Method such as [Note::from_json]
-    /// will create owned notes in memory.
-    ///
-    /// [Drop]: std::ops::Drop
-    Owned {
-        ptr: *mut bindings::ndb_note,
-        size: usize,
-    },
-
-    /// An note owned somewhere else. We don't know if its from the DB or not. This
+    /// A note owned somewhere else. We don't know if its from the DB or not. This
     /// is used for custom filter callbacks.
     Unowned { ptr: &'a bindings::ndb_note },
 
@@ -70,64 +90,7 @@ pub enum Note<'a> {
     },
 }
 
-impl Clone for Note<'_> {
-    fn clone(&self) -> Self {
-        // TODO (jb55): it is still probably better to just separate owned notes
-        // into NoteBuf... that way we know exactly what we are cloning
-        // and when. Owned notes are a bit more expensive to clone, so
-        // it would be better if API encoded that explicitly.
-        match self {
-            Note::Unowned { ptr } => Note::Unowned { ptr },
-
-            Note::Owned { ptr, size } => {
-                // Allocate memory for the cloned note
-                let new_ptr = unsafe { libc::malloc(*size) as *mut bindings::ndb_note };
-                if new_ptr.is_null() {
-                    panic!("Failed to allocate memory for cloned note");
-                }
-
-                // Use memcpy to copy the memory
-                unsafe {
-                    libc::memcpy(
-                        new_ptr as *mut libc::c_void,
-                        *ptr as *const libc::c_void,
-                        *size,
-                    );
-                }
-
-                // Return a new Owned Note
-                Note::Owned {
-                    ptr: new_ptr,
-                    size: *size,
-                }
-            }
-
-            Note::Transactional {
-                ptr,
-                size,
-                key,
-                transaction,
-            } => Note::Transactional {
-                ptr: *ptr,
-                size: *size,
-                key: *key,
-                transaction,
-            },
-        }
-    }
-}
-
 impl<'a> Note<'a> {
-    /// Constructs an owned `Note`. This note is a pointer to a note in
-    /// memory and will be free'd when [Drop]ped. You normally wouldn't
-    /// use this method directly, public consumer would use from_json instead.
-    ///
-    /// [Drop]: std::ops::Drop
-    #[allow(dead_code)]
-    pub(crate) fn new_owned(ptr: *mut bindings::ndb_note, size: usize) -> Note<'static> {
-        Note::Owned { ptr, size }
-    }
-
     #[allow(dead_code)]
     pub(crate) fn new_unowned(ptr: &'a bindings::ndb_note) -> Note<'a> {
         Note::Unowned { ptr }
@@ -182,7 +145,6 @@ impl<'a> Note<'a> {
     #[inline]
     pub fn size(&self) -> usize {
         match self {
-            Note::Owned { size, .. } => *size,
             Note::Unowned { .. } => 0,
             Note::Transactional { size, .. } => *size,
         }
@@ -228,7 +190,6 @@ impl<'a> Note<'a> {
     #[inline]
     pub fn as_ptr(&self) -> *mut bindings::ndb_note {
         match self {
-            Note::Owned { ptr, .. } => *ptr,
             Note::Unowned { ptr } => *ptr as *const bindings::ndb_note as *mut bindings::ndb_note,
             Note::Transactional { ptr, .. } => *ptr,
         }
@@ -311,7 +272,7 @@ impl<'a> Note<'a> {
     #[inline]
     pub fn tags(&self) -> Tags<'a> {
         let tags = unsafe { bindings::ndb_note_tags(self.as_ptr()) };
-        Tags::new(tags, self.clone())
+        Tags::new(tags, self.as_ptr())
     }
 
     #[inline]
@@ -319,14 +280,6 @@ impl<'a> Note<'a> {
         unsafe {
             let ptr = bindings::ndb_note_sig(self.as_ptr());
             &*(ptr as *const [u8; 64])
-        }
-    }
-}
-
-impl Drop for Note<'_> {
-    fn drop(&mut self) {
-        if let Note::Owned { ptr, .. } = self {
-            unsafe { libc::free((*ptr) as *mut libc::c_void) }
         }
     }
 }
@@ -522,7 +475,7 @@ impl<'a> NoteBuilder<'a> {
         self
     }
 
-    pub fn build(&mut self) -> Option<Note<'static>> {
+    pub fn build(&mut self) -> Option<NoteBuf> {
         let mut note_ptr: *mut bindings::ndb_note = std::ptr::null_mut();
         let mut keypair = bindings::ndb_keypair::default();
 
@@ -570,7 +523,10 @@ impl<'a> NoteBuilder<'a> {
             return None;
         }
 
-        Some(Note::new_owned(note_ptr, size))
+        Some(NoteBuf {
+            ptr: note_ptr,
+            size,
+        })
     }
 }
 
@@ -622,7 +578,7 @@ mod tests {
             0xe8, 0x5b, 0xa8, 0x59,
         ];
 
-        let note = NoteBuilder::new()
+        let note_buf = NoteBuilder::new()
             .kind(1)
             .content("this is the content")
             .created_at(42)
@@ -636,6 +592,7 @@ mod tests {
             .build()
             .expect("expected build to work");
 
+        let note = note_buf.as_note();
         assert_eq!(note.created_at(), 42);
         assert_eq!(note.content(), "this is the content");
         assert_eq!(note.kind(), 1);
@@ -664,5 +621,33 @@ mod tests {
             &json[..267],
             "{\"id\":\"fb165be22c7b2518b749aabb7140c73f0887fe84475c82785700663be85ba859\",\"pubkey\":\"6c540ed060bfc2b0c5b6f09cd3ebedf980ef7bc836d69582361d20f2ad124f23\",\"created_at\":42,\"kind\":1,\"tags\":[[\"comment\",\"this is a comment\"],[\"blah\",\"something\"]],\"content\":\"this is the content\""
         );
+    }
+
+    #[test]
+    fn owned_note_tag_str_not_dangling() {
+        let note_buf = NoteBuilder::new()
+            .kind(1)
+            .content("")
+            .start_tag()
+            .tag_str("d")
+            .tag_str("my-id")
+            .build()
+            .expect("build");
+        let note = note_buf.as_note();
+
+        fn get_tag_value<'a>(note: &Note<'a>, tag_name: &str) -> Option<&'a str> {
+            for tag in note.tags() {
+                if tag.count() < 2 {
+                    continue;
+                }
+                if tag.get_str(0) == Some(tag_name) {
+                    return tag.get_str(1);
+                }
+            }
+            None
+        }
+
+        let val = get_tag_value(&note, "d");
+        assert_eq!(val, Some("my-id"));
     }
 }

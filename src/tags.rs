@@ -1,48 +1,50 @@
-use crate::{bindings, NdbStr, Note};
+use crate::{bindings, NdbStr};
+use std::marker::PhantomData;
 
-#[derive(Debug, Clone)]
-pub struct Tag<'n> {
+#[derive(Debug, Clone, Copy)]
+pub struct Tag<'a> {
     ptr: *mut bindings::ndb_tag,
-    note: Note<'n>,
+    note_ptr: *mut bindings::ndb_note,
+    _marker: PhantomData<&'a ()>,
 }
 
-impl<'n> Tag<'n> {
-    pub(crate) fn new(ptr: *mut bindings::ndb_tag, note: Note<'n>) -> Self {
-        Tag { ptr, note }
+impl<'a> Tag<'a> {
+    pub(crate) fn new(ptr: *mut bindings::ndb_tag, note_ptr: *mut bindings::ndb_note) -> Self {
+        Tag {
+            ptr,
+            note_ptr,
+            _marker: PhantomData,
+        }
     }
 
     pub fn count(&self) -> u16 {
         unsafe { bindings::ndb_tag_count(self.as_ptr()) }
     }
 
-    pub fn get_unchecked(&self, ind: u16) -> NdbStr<'n> {
+    pub fn get_unchecked(&self, ind: u16) -> NdbStr<'a> {
         let nstr = unsafe {
             bindings::ndb_tag_str(
-                self.note().as_ptr(),
+                self.note_ptr,
                 self.as_ptr(),
                 ind as ::std::os::raw::c_int,
             )
         };
-        NdbStr::new(nstr, self.note.clone())
+        NdbStr::new(nstr, self.note_ptr)
     }
 
-    pub fn get_str(&self, ind: u16) -> Option<&'n str> {
+    pub fn get_str(&self, ind: u16) -> Option<&'a str> {
         self.get(ind).and_then(|s| s.str())
     }
 
-    pub fn get_id(&self, ind: u16) -> Option<&'n [u8; 32]> {
+    pub fn get_id(&self, ind: u16) -> Option<&'a [u8; 32]> {
         self.get(ind).and_then(|s| s.id())
     }
 
-    pub fn get(&self, ind: u16) -> Option<NdbStr<'n>> {
+    pub fn get(&self, ind: u16) -> Option<NdbStr<'a>> {
         if ind >= self.count() {
             return None;
         }
         Some(self.get_unchecked(ind))
-    }
-
-    pub fn note(&self) -> &Note<'n> {
-        &self.note
     }
 
     pub fn as_ptr(&self) -> *mut bindings::ndb_tag {
@@ -59,10 +61,11 @@ impl<'a> IntoIterator for Tag<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Tags<'a> {
     ptr: *mut bindings::ndb_tags,
-    note: Note<'a>,
+    note_ptr: *mut bindings::ndb_note,
+    _marker: PhantomData<&'a ()>,
 }
 
 impl<'a> IntoIterator for Tags<'a> {
@@ -70,13 +73,17 @@ impl<'a> IntoIterator for Tags<'a> {
     type IntoIter = TagsIter<'a>;
 
     fn into_iter(self) -> TagsIter<'a> {
-        TagsIter::new(self.note().clone())
+        TagsIter::new(self.note_ptr)
     }
 }
 
 impl<'a> Tags<'a> {
-    pub(crate) fn new(ptr: *mut bindings::ndb_tags, note: Note<'a>) -> Self {
-        Tags { ptr, note }
+    pub(crate) fn new(ptr: *mut bindings::ndb_tags, note_ptr: *mut bindings::ndb_note) -> Self {
+        Tags {
+            ptr,
+            note_ptr,
+            _marker: PhantomData,
+        }
     }
 
     pub fn count(&self) -> u16 {
@@ -84,11 +91,7 @@ impl<'a> Tags<'a> {
     }
 
     pub fn iter(&self) -> TagsIter<'a> {
-        TagsIter::new(self.note.clone())
-    }
-
-    pub fn note(&self) -> &Note<'a> {
-        &self.note
+        TagsIter::new(self.note_ptr)
     }
 
     pub fn as_ptr(&self) -> *mut bindings::ndb_tags {
@@ -96,22 +99,27 @@ impl<'a> Tags<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TagsIter<'a> {
     iter: bindings::ndb_iterator,
-    note: Note<'a>,
+    note_ptr: *mut bindings::ndb_note,
+    _marker: PhantomData<&'a ()>,
 }
 
 impl<'a> TagsIter<'a> {
-    pub fn new(note: Note<'a>) -> Self {
+    pub fn new(note_ptr: *mut bindings::ndb_note) -> Self {
         let iter = bindings::ndb_iterator {
             note: std::ptr::null_mut(),
             tag: std::ptr::null_mut(),
             index: 0,
         };
-        let mut iter = TagsIter { note, iter };
+        let mut iter = TagsIter {
+            note_ptr,
+            iter,
+            _marker: PhantomData,
+        };
         unsafe {
-            bindings::ndb_tags_iterate_start(iter.note.as_ptr(), &mut iter.iter);
+            bindings::ndb_tags_iterate_start(note_ptr, &mut iter.iter);
         };
         iter
     }
@@ -121,12 +129,8 @@ impl<'a> TagsIter<'a> {
         if tag_ptr.is_null() {
             None
         } else {
-            Some(Tag::new(tag_ptr, self.note().clone()))
+            Some(Tag::new(tag_ptr, self.note_ptr))
         }
-    }
-
-    pub fn note(&self) -> &Note<'a> {
-        &self.note
     }
 
     pub fn as_ptr(&self) -> *const bindings::ndb_iterator {
@@ -138,7 +142,7 @@ impl<'a> TagsIter<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TagIter<'a> {
     tag: Tag<'a>,
     index: u16,

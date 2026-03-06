@@ -47,7 +47,7 @@ pub use metadata::{
 pub use ndb::Ndb;
 pub use ndb_profile::{NdbProfile, NdbProfileRecord};
 pub use ndb_str::{NdbStr, NdbStrVariant};
-pub use note::{Note, NoteBuildOptions, NoteBuilder, NoteKey};
+pub use note::{Note, NoteBuf, NoteBuildOptions, NoteBuilder, NoteKey};
 pub use profile::{ProfileKey, ProfileRecord};
 pub use query::QueryResult;
 pub use relay::NoteRelays;
