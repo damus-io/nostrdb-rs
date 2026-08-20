@@ -380,11 +380,25 @@ pub fn frames_where(
 }
 
 /// The value of a note's `d` tag, if any.
+///
+/// A `d` whose value is a 64-char hex string — as relation/blockers/related
+/// events use, where the `d` is a card id — is stored by nostrdb as a 32-byte
+/// id, not a string, so `get_str(1)` returns `None` for it. Fall back to reading
+/// the element as an id and hex-encoding it. Without the fallback those
+/// coordinates slip past [`frames_where`]'s dedup into the un-deduped `plain`
+/// bucket, so every stale revision re-flushes to the relay on every run (the
+/// relay keeps only the latest per `d` and rejects the rest as "replaced", so it
+/// never converges). Kinds whose `d` isn't hex (board slug, `board:card`
+/// placement, `container:card` sequence) are unaffected and keep reading as
+/// strings.
 fn d_tag(note: &Note) -> Option<String> {
     note.tags().iter().find_map(|tag| {
-        (tag.get_str(0) == Some("d"))
-            .then(|| tag.get_str(1).map(str::to_owned))
-            .flatten()
+        if tag.get_str(0) != Some("d") {
+            return None;
+        }
+        tag.get_str(1)
+            .map(str::to_owned)
+            .or_else(|| tag.get_id(1).map(hex::encode))
     })
 }
 
@@ -566,4 +580,106 @@ pub fn parse_nsec(nsec: &str) -> Result<([u8; 32], Pubkey)> {
         .map_err(|_| "nsec did not decode to 32 bytes")?;
     let keypair = crate::Keypair::from_secret(crate::SecretKey::from_slice(&secret)?);
     Ok((secret, keypair.pubkey))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nostrdb::NoteBuilder;
+    use tempfile::TempDir;
+
+    const TEST_SECKEY: [u8; 32] = [7u8; 32];
+    /// A 64-char hex `d` value — the shape nostrdb stores as a 32-byte id rather
+    /// than a string (a card id, as an addressable relation/blockers event uses).
+    const HEX_D: &str = "d667280d8ae3ff165baf238a6d531f6547906065e53cbdee6409550a2a5cb11e";
+
+    fn temp_ndb() -> (TempDir, Ndb) {
+        let dir = TempDir::new().expect("tmp dir");
+        let ndb = Ndb::new(dir.path().to_str().expect("path"), &Config::new()).expect("ndb");
+        (dir, ndb)
+    }
+
+    /// Ingest a signed addressable note (`kind`, `d`, `created_at`) with distinct
+    /// `content` (so each revision gets a distinct id), and return its id.
+    fn ingest_addr(ndb: &Ndb, kind: u32, d: &str, created_at: u64, content: &str) -> [u8; 32] {
+        let note = NoteBuilder::new()
+            .kind(kind)
+            .content(content)
+            .created_at(created_at)
+            .start_tag()
+            .tag_str("d")
+            .tag_str(d)
+            .sign(&TEST_SECKEY)
+            .build()
+            .expect("build note");
+        let id = *note.id();
+        let frame = format!(r#"["EVENT",{}]"#, note.json().expect("json"));
+        ndb.process_client_event(&frame).expect("ingest");
+        // Wait until it is queryable.
+        for _ in 0..1000 {
+            let txn = Transaction::new(ndb).expect("txn");
+            if ndb
+                .query(&txn, &[Filter::new().kinds([kind as u64]).build()], 1_000_000)
+                .expect("query")
+                .iter()
+                .any(|n| n.note.id() == &id)
+            {
+                return id;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        panic!("note {kind} never became queryable");
+    }
+
+    /// A `d` whose value is a 64-hex card id is stored as an id, not a string, so
+    /// the old string-only `d_tag` read it as `None` and every stale revision of
+    /// such a coordinate slipped past the dedup and re-flushed forever. The
+    /// id-fallback keeps them collapsed to their winning revision, exactly like a
+    /// string-keyed coordinate.
+    #[test]
+    fn frames_where_dedups_id_valued_d_tags() {
+        let (_dir, ndb) = temp_ndb();
+        let kind = 30621; // relation: d = a 64-hex card id
+
+        // Two revisions of the same coordinate; the newer must win.
+        ingest_addr(&ndb, kind, HEX_D, 100, "older");
+        let newer = ingest_addr(&ndb, kind, HEX_D, 200, "newer");
+
+        let filter = Filter::new().kinds([kind as u64]).build();
+        let frames = frames_where(&ndb, &filter, &|k| (30_000..40_000).contains(&k), |_| true);
+
+        assert_eq!(
+            frames.len(),
+            1,
+            "an id-valued d coordinate must dedup to one winning revision, got {frames:#?}"
+        );
+        let pushed: serde_json::Value =
+            serde_json::from_str(&frames[0]).expect("frame json");
+        assert_eq!(
+            pushed[1]["id"].as_str().unwrap(),
+            hex::encode(newer),
+            "the newest revision must be the survivor"
+        );
+    }
+
+    /// The id fallback must not disturb string-valued `d` tags (board slug,
+    /// `board:card` placement, `container:card` sequence): those still read as
+    /// strings and dedup as before.
+    #[test]
+    fn frames_where_still_dedups_string_d_tags() {
+        let (_dir, ndb) = temp_ndb();
+        let kind = 30620; // placement: d = "board:card" (not pure hex)
+        let d = "myboard:abc123";
+
+        ingest_addr(&ndb, kind, d, 100, "older");
+        let newer = ingest_addr(&ndb, kind, d, 200, "newer");
+
+        let filter = Filter::new().kinds([kind as u64]).build();
+        let frames = frames_where(&ndb, &filter, &|k| (30_000..40_000).contains(&k), |_| true);
+
+        assert_eq!(frames.len(), 1, "string-d coordinate must dedup too");
+        let pushed: serde_json::Value =
+            serde_json::from_str(&frames[0]).expect("frame json");
+        assert_eq!(pushed[1]["id"].as_str().unwrap(), hex::encode(newer));
+    }
 }
