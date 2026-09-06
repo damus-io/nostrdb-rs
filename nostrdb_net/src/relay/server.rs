@@ -29,6 +29,8 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures_util::{SinkExt, StreamExt};
 use negentropy::{Id, Negentropy, NegentropyStorageVector};
@@ -59,11 +61,29 @@ const NEG_QUERY_LIMIT: i32 = 100_000;
 /// don't bound per-message size; the protocol still recurses across rounds.
 const NEG_FRAME_LIMIT: u64 = 0;
 
+/// Relay-wide knobs and counters shared by every connection task. Cloneable — the
+/// `Arc` counter is shared, the scalar cap is copied.
+#[derive(Clone)]
+struct ServerConfig {
+    /// Optional cap on the events a single negentropy reconciliation may match,
+    /// modelling strfry's `maxSyncEvents`: a `NEG-OPEN` whose filter matches more
+    /// is refused with a `NEG-ERR ... too many query results`, exactly the refusal
+    /// the windowed reconcile in [`sync`](super::sync) recovers from. `None`
+    /// (the default) never refuses, so the relay reconciles arbitrarily large sets.
+    neg_cap: Option<usize>,
+    /// Count of `["EVENT", …]` frames received from clients over the wire, across
+    /// all connections. Lets a test observe how many events a client *pushed* (a
+    /// reconcile that has converged pushes none), distinct from events seeded
+    /// straight into ndb, which never traverse the wire.
+    events_received: Arc<AtomicUsize>,
+}
+
 /// A running relay. Dropping the handle (or calling [`shutdown`](Self::shutdown))
 /// stops the accept loop; in-flight connection tasks then wind down on their own.
 pub struct RelayHandle {
     local_addr: SocketAddr,
     shutdown: watch::Sender<bool>,
+    events_received: Arc<AtomicUsize>,
 }
 
 impl RelayHandle {
@@ -75,6 +95,13 @@ impl RelayHandle {
     /// The `ws://` URL clients should connect to.
     pub fn url(&self) -> String {
         format!("ws://{}", self.local_addr)
+    }
+
+    /// Total `["EVENT", …]` frames clients have pushed over the wire since spawn.
+    /// A converged reconcile pushes nothing, so this counter staying put across a
+    /// second sync is the proof that the sync converged rather than re-flushing.
+    pub fn events_received(&self) -> usize {
+        self.events_received.load(Ordering::SeqCst)
     }
 
     /// Signal the accept loop to stop.
@@ -95,30 +122,54 @@ impl Drop for RelayHandle {
 /// Binds synchronously (so a port conflict surfaces here, not in a detached
 /// task) and must be called from within a Tokio runtime context.
 pub fn spawn(ndb: Ndb, addr: SocketAddr) -> std::io::Result<RelayHandle> {
+    spawn_with_cap(ndb, addr, None)
+}
+
+/// Like [`spawn`], but caps a single negentropy reconciliation at `neg_cap`
+/// matching events, modelling strfry's `maxSyncEvents`. A `NEG-OPEN` over the cap
+/// is refused with `NEG-ERR ... too many query results` — the refusal the windowed
+/// reconcile in [`sync`](super::sync) bisects under. `None` never refuses.
+pub fn spawn_with_cap(
+    ndb: Ndb,
+    addr: SocketAddr,
+    neg_cap: Option<usize>,
+) -> std::io::Result<RelayHandle> {
     let std_listener = std::net::TcpListener::bind(addr)?;
     let local_addr = std_listener.local_addr()?;
     std_listener.set_nonblocking(true)?;
     let listener = TcpListener::from_std(std_listener)?;
 
+    let config = ServerConfig {
+        neg_cap,
+        events_received: Arc::new(AtomicUsize::new(0)),
+    };
+    let events_received = config.events_received.clone();
     let (shutdown, shutdown_rx) = watch::channel(false);
-    tokio::spawn(accept_loop(listener, ndb, shutdown_rx));
+    tokio::spawn(accept_loop(listener, ndb, config, shutdown_rx));
 
     tracing::info!("nostrdb_relay listening on ws://{local_addr}");
     Ok(RelayHandle {
         local_addr,
         shutdown,
+        events_received,
     })
 }
 
-async fn accept_loop(listener: TcpListener, ndb: Ndb, mut shutdown_rx: watch::Receiver<bool>) {
+async fn accept_loop(
+    listener: TcpListener,
+    ndb: Ndb,
+    config: ServerConfig,
+    mut shutdown_rx: watch::Receiver<bool>,
+) {
     loop {
         tokio::select! {
             accepted = listener.accept() => {
                 let Ok((stream, _peer)) = accepted else { continue };
                 let ndb = ndb.clone();
+                let config = config.clone();
                 let shutdown_rx = shutdown_rx.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = serve_connection(stream, ndb, shutdown_rx).await {
+                    if let Err(err) = serve_connection(stream, ndb, config, shutdown_rx).await {
                         tracing::debug!("nostrdb_relay connection ended: {err}");
                     }
                 });
@@ -135,6 +186,7 @@ async fn accept_loop(listener: TcpListener, ndb: Ndb, mut shutdown_rx: watch::Re
 async fn serve_connection(
     stream: TcpStream,
     ndb: Ndb,
+    config: ServerConfig,
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> Result<(), BoxError> {
     let ws = accept_async(stream).await?;
@@ -160,7 +212,14 @@ async fn serve_connection(
                 let Some(msg) = incoming else { break };
                 match msg? {
                     Message::Text(text) => {
-                        handle_client_frame(&text, &ndb, &out_tx, &mut subs, &mut neg_sessions);
+                        handle_client_frame(
+                            &text,
+                            &ndb,
+                            &config,
+                            &out_tx,
+                            &mut subs,
+                            &mut neg_sessions,
+                        );
                     }
                     Message::Ping(payload) => ws_tx.send(Message::Pong(payload)).await?,
                     Message::Close(_) => break,
@@ -186,6 +245,7 @@ async fn serve_connection(
 fn handle_client_frame(
     text: &str,
     ndb: &Ndb,
+    config: &ServerConfig,
     out_tx: &mpsc::UnboundedSender<Message>,
     subs: &mut HashMap<String, oneshot::Sender<()>>,
     neg_sessions: &mut HashMap<String, NegSession>,
@@ -196,14 +256,14 @@ fn handle_client_frame(
     };
 
     match frame.first().and_then(Value::as_str) {
-        Some("EVENT") => handle_event(text, &frame, ndb, out_tx),
+        Some("EVENT") => handle_event(text, &frame, ndb, config, out_tx),
         Some("REQ") => handle_req(&frame, ndb, out_tx, subs),
         Some("CLOSE") => {
             if let Some(sub_id) = frame.get(1).and_then(Value::as_str) {
                 subs.remove(sub_id);
             }
         }
-        Some("NEG-OPEN") => handle_neg_open(&frame, ndb, out_tx, neg_sessions),
+        Some("NEG-OPEN") => handle_neg_open(&frame, ndb, config, out_tx, neg_sessions),
         Some("NEG-MSG") => handle_neg_msg(&frame, out_tx, neg_sessions),
         Some("NEG-CLOSE") => {
             if let Some(sub_id) = frame.get(1).and_then(Value::as_str) {
@@ -216,7 +276,18 @@ fn handle_client_frame(
     }
 }
 
-fn handle_event(text: &str, frame: &[Value], ndb: &Ndb, out_tx: &mpsc::UnboundedSender<Message>) {
+fn handle_event(
+    text: &str,
+    frame: &[Value],
+    ndb: &Ndb,
+    config: &ServerConfig,
+    out_tx: &mpsc::UnboundedSender<Message>,
+) {
+    // Count every EVENT frame that crosses the wire, whether or not ndb ends up
+    // storing it (a duplicate/replaced push still arrived) — the metric is what
+    // the client *sent*, which is what a convergence test asserts on.
+    config.events_received.fetch_add(1, Ordering::SeqCst);
+
     let event_id = frame
         .get(1)
         .and_then(|e| e.get("id"))
@@ -361,6 +432,7 @@ async fn stream_subscription(
 fn handle_neg_open(
     frame: &[Value],
     ndb: &Ndb,
+    config: &ServerConfig,
     out_tx: &mpsc::UnboundedSender<Message>,
     neg_sessions: &mut HashMap<String, NegSession>,
 ) {
@@ -383,8 +455,16 @@ fn handle_neg_open(
         return;
     };
 
-    let mut session = match build_neg_session(ndb, filter) {
-        Ok(session) => session,
+    let mut session = match build_neg_session(ndb, filter, config.neg_cap) {
+        Ok(Some(session)) => session,
+        // Over the per-sync cap: refuse the whole reconciliation, as strfry does
+        // for a filter matching more than `maxSyncEvents`. The `too many query
+        // results` reason (plus the numeric cap) is what a windowed client
+        // downcasts to `TooManyResults` and recovers by bisecting the range.
+        Ok(None) => {
+            let _ = out_tx.send(neg_err_too_many(sub_id, config.neg_cap));
+            return;
+        }
         Err(err) => {
             let _ = out_tx.send(neg_err(sub_id, &format!("could not build set: {err}")));
             return;
@@ -435,9 +515,23 @@ fn handle_neg_msg(
 
 /// Build a sealed negentropy reconciliation set from every event in ndb matching
 /// `filter`, keyed by `(created_at, id)` as the protocol requires.
-fn build_neg_session(ndb: &Ndb, filter: Filter) -> Result<NegSession, BoxError> {
+///
+/// Returns `Ok(None)` when the match exceeds `neg_cap` (strfry `maxSyncEvents`):
+/// the caller refuses the whole reconciliation rather than reconciling a truncated
+/// prefix, mirroring a real relay's per-sync cap. `None` cap never refuses.
+fn build_neg_session(
+    ndb: &Ndb,
+    filter: Filter,
+    neg_cap: Option<usize>,
+) -> Result<Option<NegSession>, BoxError> {
     let txn = Transaction::new(ndb)?;
     let results = ndb.query(&txn, &[filter], NEG_QUERY_LIMIT)?;
+
+    if let Some(cap) = neg_cap
+        && results.len() > cap
+    {
+        return Ok(None);
+    }
 
     let mut storage = NegentropyStorageVector::with_capacity(results.len());
     for result in results {
@@ -453,7 +547,7 @@ fn build_neg_session(ndb: &Ndb, filter: Filter) -> Result<NegSession, BoxError> 
     }
     storage.seal()?;
 
-    Ok(Negentropy::owned(storage, NEG_FRAME_LIMIT)?)
+    Ok(Some(Negentropy::owned(storage, NEG_FRAME_LIMIT)?))
 }
 
 fn ok(event_id: &str, status: bool, message: &str) -> Message {
@@ -468,6 +562,19 @@ fn neg_msg(sub_id: &str, msg: &[u8]) -> Message {
 /// `["NEG-ERR", <sub>, <reason>]` — abort a reconciliation with a reason.
 fn neg_err(sub_id: &str, reason: &str) -> Message {
     Message::Text(json!(["NEG-ERR", sub_id, reason]).to_string())
+}
+
+/// The cap refusal: `["NEG-ERR", <sub>, "blocked: too many query results", <cap>]`.
+/// The reason string is what a client matches to raise `TooManyResults`, and the
+/// 4th element carries the numeric cap it advertises (strfry includes it), which
+/// the client surfaces in its warning.
+fn neg_err_too_many(sub_id: &str, cap: Option<usize>) -> Message {
+    match cap {
+        Some(cap) => Message::Text(
+            json!(["NEG-ERR", sub_id, "blocked: too many query results", cap]).to_string(),
+        ),
+        None => neg_err(sub_id, "blocked: too many query results"),
+    }
 }
 
 fn eose(sub_id: &str) -> Message {

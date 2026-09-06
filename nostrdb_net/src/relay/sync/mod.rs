@@ -97,15 +97,143 @@ pub async fn reconcile_sync(
                 }
             }
         }
-        // Sync is best-effort. A relay that doesn't speak NIP-77 (an older
-        // notedeck, or a plain NIP-01 relay) can't reconcile — fall back to a
-        // full NIP-01 sync rather than failing or, worse, hanging. If even that
-        // fails, warn and carry on against the cache.
+        // A cap refusal — the filter matches more events than the relay's
+        // per-sync negentropy cap (strfry `maxSyncEvents`), so it streams no
+        // reconciliation at all — is recoverable by *windowing* the `created_at`
+        // range until each sub-reconcile stays under the cap. The plain-`REQ`
+        // `fallback_sync` can't recover it: the relay caps that `REQ` too, so it
+        // sees only the newest slice and re-pushes every local event outside it
+        // on every run, never converging. Route it to the windowed path instead.
+        Err(e) if e.downcast_ref::<TooManyResults>().is_some() => {
+            if let Err(e) =
+                reconcile_sync_windowed(relay, ndb, author, kinds, filter, is_addressable).await
+            {
+                eprintln!("warning: windowed reconcile failed: {e}");
+            }
+        }
+        // Any other reconcile failure has no windowed recovery. A relay that
+        // doesn't speak NIP-77 (an older notedeck, or a plain NIP-01 relay) can't
+        // reconcile — fall back to a full NIP-01 sync rather than failing or,
+        // worse, hanging. If even that fails, warn and carry on against the cache.
         Err(e) => {
             eprintln!("warning: negentropy reconcile unavailable: {e}");
             if let Err(e) = fallback_sync(relay, ndb, kinds, author, filter, is_addressable).await {
                 eprintln!("warning: fallback sync failed: {e}");
             }
+        }
+    }
+    Ok(())
+}
+
+/// Upper bound for a windowed reconcile's `created_at` search: `u32::MAX` (unix
+/// second `4294967295` ≈ year 2106). Far past any real event time — so windowing
+/// covers events even when their `created_at` runs ahead of this device's clock
+/// (the observed case for freshly-authored envelopes) — yet within the 32-bit
+/// range nostrdb's filter `since`/`until` accept (a larger value fails
+/// `Filter::from_json` with `BufferOverflow`). Mirrors [`Session`]'s
+/// `BACKFILL_UNTIL`; windows over the cap hone in by bisection, so an over-wide
+/// upper bound costs only a few cheap empty-range reconciles.
+const RECONCILE_UNTIL: u64 = u32::MAX as u64;
+
+/// Bidirectional reconcile of a single-author filter that matches more events than
+/// the relay's per-sync negentropy cap, by bisecting the `created_at` range until
+/// every window reconciles under the cap.
+///
+/// The plaintext leg's filter `{kinds, authors:[account]}` can match well over the
+/// cap (strfry `maxSyncEvents`, 5000) on a large account, so the relay refuses the
+/// whole `NEG-OPEN` and [`reconcile_sync`] would otherwise fall back to
+/// [`fallback_sync`]'s plain `REQ` — which the relay also caps (~500 results), so
+/// it sees only the newest slice and re-pushes every local event outside it on
+/// every run, never converging. This runs the real negentropy reconcile per
+/// window instead: each in-cap window yields both the ids the relay holds that we
+/// lack (pulled) and the ids we hold that it lacks (accumulated), so the set
+/// difference is exact and a second run flushes nothing.
+///
+/// The windowing mirrors [`pull_reconcile_windowed`] — a LIFO stack of disjoint
+/// `[since, until]` windows, bisected on a [`TooManyResults`] refusal until each is
+/// under the cap, with a plain bounded `REQ` fallback for the pathological case of
+/// more events than the cap in a single second. It differs in one deliberate way:
+/// the push is
+/// deferred to a *single* [`frames_where`] over the whole filter after all windows
+/// reconcile, not run per window. [`frames_where`] dedups addressable events to
+/// their winning revision per `(kind, d-tag)`, and that dedup is only correct
+/// across the full set — a stale revision and its winner can fall in different
+/// `created_at` windows, so a per-window push would treat the stale one as a
+/// window-local winner and re-flush it forever. Collecting the relay-missing ids
+/// across every window first, then pushing the global winners among them, keeps
+/// the dedup intact and the reconcile converging.
+async fn reconcile_sync_windowed(
+    relay: &mut Relay,
+    ndb: &Ndb,
+    author: &Pubkey,
+    kinds: &[u32],
+    filter: &Filter,
+    is_addressable: &dyn Fn(u32) -> bool,
+) -> Result<()> {
+    let base = json!({ "kinds": kinds, "authors": [author.hex()] });
+
+    // A LIFO stack of `created_at` windows still to reconcile, and the union of
+    // the ids the relay is missing across every in-cap window (pushed once at the
+    // end, deduped over the whole set — see the note above).
+    let mut windows = vec![(0u64, RECONCILE_UNTIL)];
+    let mut have: HashSet<[u8; 32]> = HashSet::new();
+    while let Some((since, until)) = windows.pop() {
+        // Reduce this window to wire JSON + a sealed local set *synchronously*, so
+        // the transient `Filter` never crosses the reconcile await below.
+        let window_json = {
+            let mut obj = base.clone();
+            // Object-key assignment overrides any inherited since/until — no
+            // duplicate fields, unlike copying them onto a FilterBuilder.
+            obj["since"] = json!(since);
+            obj["until"] = json!(until);
+            obj.to_string()
+        };
+        let local = local_set(ndb, &Filter::from_json(&window_json)?)?;
+
+        let diff = match relay.reconcile(&window_json, local).await {
+            Ok(diff) => diff,
+            // Recoverable cap refusal: bisect this window and retry each half,
+            // recursing until each is under the cap. A one-second (or empty)
+            // window can't bisect further — >cap events sharing a single second is
+            // pathological for these envelope kinds — so pull it with a plain
+            // bounded `REQ` and skip its push: without a reconcile we can't learn
+            // the set difference, and a REQ can't tell us either.
+            Err(e) if e.downcast_ref::<TooManyResults>().is_some() => {
+                if until <= since + 1 {
+                    tracing::warn!(
+                        "windowed reconcile: window [{since},{until}] over cap at min width; REQ fallback"
+                    );
+                    relay.sync_into(ndb, &window_json).await?;
+                } else {
+                    let mid = since + (until - since) / 2;
+                    windows.push((since, mid));
+                    windows.push((mid + 1, until));
+                }
+                continue;
+            }
+            // A fatal (non-cap) error propagates so the caller can fall back.
+            Err(e) => return Err(e),
+        };
+
+        // Pull the ids the relay holds that we lack, chunked under its single-`REQ`
+        // replay cap.
+        for chunk in diff.need.chunks(ID_FETCH_CHUNK) {
+            let ids: Vec<String> = chunk.iter().map(hex::encode).collect();
+            relay
+                .sync_into(ndb, &json!({ "ids": ids }).to_string())
+                .await?;
+        }
+        have.extend(diff.have);
+    }
+
+    // Push the events the relay is missing, deduped to their winning revision
+    // across the whole set. Best-effort: a rejected flush (or a dropped connection
+    // mid-push) mustn't abort the command.
+    let pending = frames_where(ndb, filter, is_addressable, |id| have.contains(id));
+    if !pending.is_empty() {
+        match relay.publish(&pending).await {
+            Ok(()) => eprintln!("flushed {} local event(s) to the relay", pending.len()),
+            Err(e) => eprintln!("warning: couldn't flush local events: {e}"),
         }
     }
     Ok(())
@@ -586,6 +714,7 @@ pub fn parse_nsec(nsec: &str) -> Result<([u8; 32], Pubkey)> {
 mod tests {
     use super::*;
     use nostrdb::NoteBuilder;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     const TEST_SECKEY: [u8; 32] = [7u8; 32];
@@ -619,7 +748,11 @@ mod tests {
         for _ in 0..1000 {
             let txn = Transaction::new(ndb).expect("txn");
             if ndb
-                .query(&txn, &[Filter::new().kinds([kind as u64]).build()], 1_000_000)
+                .query(
+                    &txn,
+                    &[Filter::new().kinds([kind as u64]).build()],
+                    1_000_000,
+                )
                 .expect("query")
                 .iter()
                 .any(|n| n.note.id() == &id)
@@ -653,8 +786,7 @@ mod tests {
             1,
             "an id-valued d coordinate must dedup to one winning revision, got {frames:#?}"
         );
-        let pushed: serde_json::Value =
-            serde_json::from_str(&frames[0]).expect("frame json");
+        let pushed: serde_json::Value = serde_json::from_str(&frames[0]).expect("frame json");
         assert_eq!(
             pushed[1]["id"].as_str().unwrap(),
             hex::encode(newer),
@@ -678,8 +810,187 @@ mod tests {
         let frames = frames_where(&ndb, &filter, &|k| (30_000..40_000).contains(&k), |_| true);
 
         assert_eq!(frames.len(), 1, "string-d coordinate must dedup too");
-        let pushed: serde_json::Value =
-            serde_json::from_str(&frames[0]).expect("frame json");
+        let pushed: serde_json::Value = serde_json::from_str(&frames[0]).expect("frame json");
         assert_eq!(pushed[1]["id"].as_str().unwrap(), hex::encode(newer));
+    }
+
+    /// The account pubkey derived from [`TEST_SECKEY`] — the `authors` the wire
+    /// filter reconciles under, matching the pubkey every note built with that key
+    /// carries.
+    fn test_author() -> Pubkey {
+        crate::Keypair::from_secret(crate::SecretKey::from_slice(&TEST_SECKEY).expect("seckey"))
+            .pubkey
+    }
+
+    /// Ingest a signed immutable note (`kind`, `created_at`, `content`) into `ndb`
+    /// and return its id, waiting until it's queryable. Distinct `content` gives a
+    /// distinct id; identical `(kind, created_at, content)` yields the *same* id on
+    /// two dbs (no ephemeral randomness), which is how a "shared" event is placed on
+    /// both the relay and the client.
+    fn ingest_plain(ndb: &Ndb, kind: u32, created_at: u64, content: &str) -> [u8; 32] {
+        let note = NoteBuilder::new()
+            .kind(kind)
+            .content(content)
+            .created_at(created_at)
+            .sign(&TEST_SECKEY)
+            .build()
+            .expect("build note");
+        let id = *note.id();
+        let frame = format!(r#"["EVENT",{}]"#, note.json().expect("json"));
+        ndb.process_client_event(&frame).expect("ingest");
+        for _ in 0..1000 {
+            if count_kind(ndb, kind) > 0
+                && let Ok(txn) = Transaction::new(ndb)
+                && ndb.get_note_by_id(&txn, &id).is_ok()
+            {
+                return id;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        panic!("note never became queryable");
+    }
+
+    /// Count events of `kind` currently queryable in `ndb`.
+    fn count_kind(ndb: &Ndb, kind: u32) -> usize {
+        let Ok(txn) = Transaction::new(ndb) else {
+            return 0;
+        };
+        ndb.query(
+            &txn,
+            &[Filter::new().kinds([kind as u64]).build()],
+            1_000_000,
+        )
+        .map(|r| r.len())
+        .unwrap_or(0)
+    }
+
+    /// Poll until `ndb` holds at least `target` events of `kind`, or the timeout
+    /// elapses. Returns the final count. Used to let the relay's background ingest
+    /// of freshly-pushed events settle before the next reconcile reads its set.
+    async fn wait_for_count(ndb: &Ndb, kind: u32, target: usize) -> usize {
+        for _ in 0..500 {
+            let n = count_kind(ndb, kind);
+            if n >= target {
+                return n;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        count_kind(ndb, kind)
+    }
+
+    /// A single-author set larger than the relay's per-sync negentropy cap must
+    /// **converge**: the first [`reconcile_sync`] flushes the genuine backlog (the
+    /// events the relay is missing), and a second one — now that both sides agree —
+    /// flushes *nothing*. This is the regression guard for the capped-`REQ`
+    /// fallback that re-pushed the same thousands every run because the plain `REQ`
+    /// could only ever see the newest slice under the cap.
+    ///
+    /// The relay is stood up with a cap far below the set size, so an un-windowed
+    /// `NEG-OPEN` is refused and [`reconcile_sync`] must take its windowed path.
+    /// The relay's wire-`EVENT` counter is the convergence probe: it counts what
+    /// the client *pushed*, so a second run leaving it untouched proves no re-flush.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn over_cap_reconcile_converges_without_reflushing() {
+        // is_addressable=false, so `kind` only needs to be distinct from noise.
+        const KIND: u32 = 30078;
+        const CAP: usize = 20;
+        const BASE: u64 = 1_000_000;
+        const SHARED: u64 = 30; // held by both sides
+        const RELAY_ONLY: u64 = 10; // relay has, client must pull
+        const CLIENT_ONLY: u64 = 10; // client has, must push
+        let total = (SHARED + RELAY_ONLY + CLIENT_ONLY) as usize; // 50 after convergence
+
+        let author = test_author();
+        let (_rdir, relay_ndb) = temp_ndb();
+        let (_cdir, client_ndb) = temp_ndb();
+
+        // Shared events land identically on both sides (same id). Distinct
+        // `created_at` per event lets the windowing bisect the range under the cap;
+        // >cap events sharing one second would trip the pathological REQ fallback.
+        for i in 0..SHARED {
+            let content = format!("shared-{i}");
+            ingest_plain(&relay_ndb, KIND, BASE + i, &content);
+            ingest_plain(&client_ndb, KIND, BASE + i, &content);
+        }
+        for i in 0..RELAY_ONLY {
+            ingest_plain(&relay_ndb, KIND, BASE + 100 + i, &format!("relayonly-{i}"));
+        }
+        for i in 0..CLIENT_ONLY {
+            ingest_plain(
+                &client_ndb,
+                KIND,
+                BASE + 200 + i,
+                &format!("clientonly-{i}"),
+            );
+        }
+
+        // Cap the relay well below either side's match (40), so the reconcile can't
+        // run in one shot and must window.
+        let relay_handle = crate::relay::server::spawn_with_cap(
+            relay_ndb.clone(),
+            "127.0.0.1:0".parse().expect("addr"),
+            Some(CAP),
+        )
+        .expect("spawn relay");
+
+        let kinds = [KIND];
+        let filter = Filter::new()
+            .kinds([KIND as u64])
+            .authors([author.bytes()])
+            .build();
+        let is_addr = |_k: u32| false;
+
+        let mut relay = Relay::connect(&relay_handle.url()).await.expect("connect");
+
+        // First reconcile: pull the 10 relay-only down, push the 10 client-only up.
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            reconcile_sync(&mut relay, &client_ndb, &author, &kinds, &filter, &is_addr),
+        )
+        .await
+        .expect("first reconcile settles")
+        .expect("first reconcile ok");
+
+        assert_eq!(
+            count_kind(&client_ndb, KIND),
+            total,
+            "first reconcile pulls the relay-only events into the client"
+        );
+        assert_eq!(
+            relay_handle.events_received(),
+            CLIENT_ONLY as usize,
+            "first reconcile pushes exactly the events the relay was missing"
+        );
+
+        // Let the relay ingest the pushed events so its set is whole before run two;
+        // otherwise a still-lagging ingest would (correctly) re-report them.
+        assert_eq!(
+            wait_for_count(&relay_ndb, KIND, total).await,
+            total,
+            "relay ingests the pushed events"
+        );
+
+        // Second reconcile: both sides now agree, so it must push nothing.
+        let before = relay_handle.events_received();
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            reconcile_sync(&mut relay, &client_ndb, &author, &kinds, &filter, &is_addr),
+        )
+        .await
+        .expect("second reconcile settles")
+        .expect("second reconcile ok");
+
+        assert_eq!(
+            relay_handle.events_received(),
+            before,
+            "converged: the second reconcile re-flushes nothing"
+        );
+        assert_eq!(
+            count_kind(&client_ndb, KIND),
+            total,
+            "no spurious growth on the converged run"
+        );
+
+        relay_handle.shutdown();
     }
 }
