@@ -4,11 +4,23 @@ use std::ops::ControlFlow;
 use std::ptr;
 
 use crate::bindings::ndb_search;
+use crate::config::SubCallbackCtx;
 use crate::{
     bindings, Blocks, Config, Error, Filter, IngestMetadata, Note, NoteKey, NoteMetadata,
     ProfileKey, ProfileRecord, QueryResult, Result, Subscription, SubscriptionState,
     SubscriptionStream, Transaction,
 };
+
+/// A raw `sub_cb_ctx` the caller installed by hand. Wrapped so the chaining
+/// closure in [`Ndb::new`] can be `Send + Sync`; nostrdb calls it on the writer
+/// thread exactly as it would have without us in the way.
+struct RawCbCtx(*mut ::std::os::raw::c_void);
+
+/// SAFETY: upheld by whoever poked the raw callback into the `ndb_config`.
+unsafe impl Send for RawCbCtx {}
+
+/// SAFETY: upheld by whoever poked the raw callback into the `ndb_config`.
+unsafe impl Sync for RawCbCtx {}
 use futures::StreamExt;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -18,10 +30,18 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tracing::debug;
 
-#[derive(Debug)]
 struct NdbRef {
     ndb: *mut bindings::ndb,
-    rust_cb_ctx: *mut ::std::os::raw::c_void,
+
+    /// Keeps the subscription callback alive for as long as nostrdb can call
+    /// it. Dropped after `ndb_destroy` below has joined the writer thread.
+    _sub_cb: Option<Arc<SubCallbackCtx>>,
+}
+
+impl std::fmt::Debug for NdbRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NdbRef").field("ndb", &self.ndb).finish()
+    }
 }
 
 /// SAFETY: thread safety is ensured by nostrdb
@@ -34,12 +54,9 @@ unsafe impl Sync for NdbRef {}
 impl Drop for NdbRef {
     fn drop(&mut self) {
         unsafe {
+            // Joins the writer thread, so no callback can be running once this
+            // returns. `_sub_cb` is dropped after this, in field order.
             bindings::ndb_destroy(self.ndb);
-
-            if !self.rust_cb_ctx.is_null() {
-                // Rebuild the Box from the raw pointer and drop it.
-                let _ = Box::from_raw(self.rust_cb_ctx as *mut Box<dyn FnMut()>);
-            }
         }
     }
 }
@@ -72,27 +89,45 @@ impl Ndb {
 
         let min_mapsize = 1024 * 1024 * 512;
         let mut mapsize = config.config.mapsize;
-        let config = *config;
+        let config = config.clone();
 
-        let prev_callback = config.config.sub_cb;
-        let prev_callback_ctx = config.config.sub_cb_ctx;
+        // Whatever callback the caller configured, which we chain to after
+        // waking our own futures. `Config::set_sub_callback` puts it in
+        // `sub_cb`; a raw one poked straight into the `ndb_config` is picked up
+        // by the fallback below.
+        let user_cb = config.sub_cb.clone();
+        let raw_cb = if user_cb.is_none() {
+            config
+                .config
+                .sub_cb
+                .map(|cb| (cb, RawCbCtx(config.config.sub_cb_ctx)))
+        } else {
+            None
+        };
+
         let subs = Arc::new(Mutex::new(SubMap::default()));
         let subs_clone = subs.clone();
 
         // We need to register our own callback so that we can wake
         // query futures
         let mut config = config.set_sub_callback(move |sub_id: u64| {
-            let mut map = subs_clone.lock().unwrap();
-            if let Some(s) = map.get_mut(&Subscription::new(sub_id)) {
-                if let Some(w) = s.waker.take() {
-                    w.wake();
+            {
+                let mut map = subs_clone.lock().unwrap();
+                if let Some(s) = map.get_mut(&Subscription::new(sub_id)) {
+                    if let Some(w) = s.waker.take() {
+                        w.wake();
+                    }
                 }
             }
 
-            if let Some(pcb) = prev_callback {
-                unsafe {
-                    pcb(prev_callback_ctx, sub_id);
-                };
+            if let Some(cb) = &user_cb {
+                cb(sub_id);
+            }
+
+            if let Some((pcb, ctx)) = &raw_cb {
+                // SAFETY: the caller installed this pair on the `ndb_config`
+                // themselves and is responsible for its validity.
+                unsafe { pcb(ctx.0, sub_id) };
             }
         });
 
@@ -119,8 +154,10 @@ impl Ndb {
             return Err(Error::DbOpenFailed);
         }
 
-        let rust_cb_ctx = config.config.sub_cb_ctx;
-        let refs = Arc::new(NdbRef { ndb, rust_cb_ctx });
+        let refs = Arc::new(NdbRef {
+            ndb,
+            _sub_cb: config.sub_cb.clone(),
+        });
 
         Ok(Ndb { refs, subs })
     }
