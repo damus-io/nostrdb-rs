@@ -27,8 +27,8 @@ pub enum Error {
     #[error("Buffer overflow")]
     BufferOverflow,
 
-    #[error("Compact failed")]
-    CompactFailed,
+    #[error("Prune failed")]
+    PruneFailed,
 
     #[error("CString failed")]
     CString(#[from] std::ffi::NulError),

@@ -922,9 +922,20 @@ impl Ndb {
         Ok(results)
     }
 
-    /// Compact the database, creating a new database at `output_path`
-    /// containing only profiles and notes authored by the given pubkeys.
-    pub fn compact(&self, output_path: &str, own_pubkeys: &[[u8; 32]]) -> Result<()> {
+    /// Prune the database, creating a new database at `output_path` holding
+    /// every note that matches at least one of `filters`.
+    ///
+    /// Filters are unioned exactly as in [`Ndb::query`] and [`Ndb::subscribe`]:
+    /// a note is kept when any one of them matches. An empty `filters` keeps
+    /// everything, which is a plain copy.
+    ///
+    /// Note that pruning rewrites notes through the writer, so [`NoteKey`]s in
+    /// the output database are freshly assigned and will not match the source.
+    /// Which relays a note was seen on is not carried over either.
+    ///
+    /// For the default keep-policy — all profiles plus everything the given
+    /// pubkeys authored — pass [`Ndb::prune_default_filters`].
+    pub fn prune(&self, output_path: &str, filters: &[Filter]) -> Result<()> {
         let c_output = CString::new(output_path)?;
 
         let path = Path::new(output_path);
@@ -932,20 +943,63 @@ impl Ndb {
             fs::create_dir_all(path).map_err(Error::IO)?;
         }
 
+        let mut ndb_filters: Vec<bindings::ndb_filter> = filters.iter().map(|f| f.data).collect();
+
         let res = unsafe {
-            bindings::ndb_compact(
+            bindings::ndb_prune(
                 self.as_ptr(),
                 c_output.as_ptr(),
-                own_pubkeys.as_ptr(),
-                own_pubkeys.len() as c_int,
+                ndb_filters.as_mut_ptr(),
+                ndb_filters.len() as c_int,
             )
         };
 
         if res == 0 {
-            return Err(Error::CompactFailed);
+            return Err(Error::PruneFailed);
         }
 
         Ok(())
+    }
+
+    /// The default prune keep-policy: all kind-0 profiles, plus every note
+    /// authored by one of `pubkeys`. Feed the result to [`Ndb::prune`].
+    ///
+    /// It is a separate call so a caller can inspect the policy, extend it,
+    /// or write its own instead of inheriting one.
+    pub fn prune_default_filters(pubkeys: &[[u8; 32]]) -> Result<Vec<Filter>> {
+        let capacity = bindings::NDB_PRUNE_DEFAULT_FILTERS as usize;
+
+        // The C writes initialized filters into this array and tells us how
+        // many; on failure it leaves none initialized, so there is nothing to
+        // destroy on the error path.
+        let mut raw: Vec<bindings::ndb_filter> =
+            vec![unsafe { std::mem::zeroed::<bindings::ndb_filter>() }; capacity];
+        let mut num_filters: c_int = 0;
+
+        let res = unsafe {
+            bindings::ndb_prune_default_filters(
+                pubkeys.as_ptr(),
+                pubkeys.len() as c_int,
+                raw.as_mut_ptr(),
+                capacity as c_int,
+                &mut num_filters as *mut c_int,
+            )
+        };
+
+        if res == 0 {
+            return Err(Error::PruneFailed);
+        }
+
+        // Take ownership of the ones it actually initialized: each `Filter`
+        // destroys its own on drop, which is what the C asks of us.
+        Ok(raw
+            .into_iter()
+            .take(num_filters as usize)
+            .map(|data| Filter {
+                data,
+                custom_ctx: None,
+            })
+            .collect())
     }
 
     /// Get the underlying pointer to the context in C
@@ -1573,11 +1627,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compact_works() {
-        let db = "target/testdbs/compact";
-        let compacted_db = "target/testdbs/compact_out";
+    async fn prune_default_policy_works() {
+        let db = "target/testdbs/prune";
+        let pruned_db = "target/testdbs/prune_out";
         test_util::cleanup_db(&db);
-        test_util::cleanup_db(&compacted_db);
+        test_util::cleanup_db(&pruned_db);
 
         // secret key (for add_key) and its corresponding pubkey
         let own_secret: [u8; 32] =
@@ -1636,14 +1690,16 @@ mod tests {
                 assert_eq!(res.len(), 3);
             }
 
-            // compact: keep only notes from own_pubkey
-            ndb.compact(compacted_db, &[own_pubkey])
-                .expect("compact ok");
+            // prune under the default keep-policy: all profiles, plus
+            // everything own_pubkey authored.
+            let keep = Ndb::prune_default_filters(&[own_pubkey]).expect("default filters");
+            assert_eq!(keep.len(), 2, "kind-0 profiles plus the author filter");
+            ndb.prune(pruned_db, &keep).expect("prune ok");
         }
 
-        // open compacted db and verify contents
+        // open the pruned db and verify contents
         {
-            let ndb = Ndb::new(compacted_db, &Config::new()).expect("open compacted");
+            let ndb = Ndb::new(pruned_db, &Config::new()).expect("open pruned");
             let txn = Transaction::new(&ndb).expect("txn");
 
             // our kind-1 note should be present
@@ -1683,7 +1739,88 @@ mod tests {
         }
 
         test_util::cleanup_db(&db);
-        test_util::cleanup_db(&compacted_db);
+        test_util::cleanup_db(&pruned_db);
+    }
+
+    /// The point of taking filters rather than a pubkey list: a caller can
+    /// express its own keep-policy, and several filters union.
+    #[tokio::test]
+    async fn prune_keeps_the_union_of_custom_filters() {
+        let db = "target/testdbs/prune_custom";
+        let pruned_db = "target/testdbs/prune_custom_out";
+        test_util::cleanup_db(&db);
+        test_util::cleanup_db(&pruned_db);
+
+        let author_a: [u8; 32] =
+            hex::decode("32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15")
+                .unwrap()
+                .try_into()
+                .unwrap();
+        let author_b: [u8; 32] =
+            hex::decode("e586b8d54cfecacf251c71d0b2d9b01673c8870fb3fe82a20ce5afc44ce7fccc")
+                .unwrap()
+                .try_into()
+                .unwrap();
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+
+            let sub = ndb
+                .subscribe(&[Filter::new().kinds(vec![0, 1]).build()])
+                .expect("sub_id");
+            let waiter = ndb.wait_for_all_notes(sub, 3);
+
+            // kind 1 from author_a
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+            // kind 1 from author_b
+            ndb.process_event(r#"["EVENT","b",{"id":"2e577580420c4ef02e8067aa842dd068be7c957f81a32b325fa1849b1650d98b","pubkey":"e586b8d54cfecacf251c71d0b2d9b01673c8870fb3fe82a20ce5afc44ce7fccc","created_at":1768414963,"kind":1,"tags":[],"content":"hi","sig":"662d45856ffc66c32df33ce5e8b7b9de14981774679b36bdb787bb8feda22b47eee7257756b915f7d54a53317151b0907a40847c635c9626debfb2a7b038c76f"}]"#).expect("process ok");
+            // a kind-0 profile from a third pubkey
+            ndb.process_event(r#"["EVENT","b",{  "id": "0b9f0e14727733e430dcb00c69b12a76a1e100f419ce369df837f7eb33e4523c",  "pubkey": "3f770d65d3a764a9c5cb503ae123e62ec7598ad035d836e2a810f3877a745b24",  "created_at": 1736785355,  "kind": 0,  "tags": [    [      "alt",      "User profile for Derek Ross"    ],    [      "i",      "twitter:derekmross",      "1634343988407726081"    ],    [      "i",      "github:derekross",      "3edaf845975fa4500496a15039323fa3I"    ]  ],  "content": "{\"about\":\"Building NostrPlebs.com and NostrNests.com. The purple pill helps the orange pill go down. Nostr is the social glue that binds all of your apps together.\",\"banner\":\"https://i.nostr.build/O2JE.jpg\",\"display_name\":\"Derek Ross\",\"lud16\":\"derekross@strike.me\",\"name\":\"Derek Ross\",\"nip05\":\"derekross@nostrplebs.com\",\"picture\":\"https://i.nostr.build/MVIJ6OOFSUzzjVEc.jpg\",\"website\":\"https://nostrplebs.com\",\"created_at\":1707238393}",  "sig": "51e1225ccaf9b6739861dc218ac29045b09d5cf3a51b0ac6ea64bd36827d2d4394244e5f58a4e4a324c84eeda060e1a27e267e0d536e5a0e45b0b6bdc2c43bbc"}]"#).expect("process ok");
+
+            waiter.await.expect("await ok");
+
+            {
+                let txn = Transaction::new(&ndb).expect("txn");
+                let all = ndb
+                    .query(&txn, &[Filter::new().kinds(vec![0, 1]).build()], 10)
+                    .expect("query");
+                assert_eq!(all.len(), 3, "all three land before pruning");
+            }
+
+            // Keep only author_a's kind-1 notes. Note this deliberately does
+            // NOT keep profiles, which the default policy would.
+            let keep = vec![Filter::new()
+                .authors(vec![&author_a])
+                .kinds(vec![1])
+                .build()];
+            ndb.prune(pruned_db, &keep).expect("prune ok");
+        }
+
+        {
+            let ndb = Ndb::new(pruned_db, &Config::new()).expect("open pruned");
+            let txn = Transaction::new(&ndb).expect("txn");
+
+            let kept = ndb
+                .query(&txn, &[Filter::new().kinds(vec![0, 1]).build()], 10)
+                .expect("query");
+            assert_eq!(kept.len(), 1, "only author_a's note survives the policy");
+            assert_eq!(kept[0].note.pubkey(), &author_a);
+
+            // author_b is gone, and so are the profiles the default policy
+            // would have kept — the caller's filters are the whole policy.
+            let b_notes = ndb
+                .query(&txn, &[Filter::new().authors(vec![&author_b]).build()], 10)
+                .expect("query b");
+            assert!(b_notes.is_empty());
+
+            let profiles = ndb
+                .query(&txn, &[Filter::new().kinds(vec![0]).build()], 10)
+                .expect("query profiles");
+            assert!(profiles.is_empty(), "no filter asked for profiles");
+        }
+
+        test_util::cleanup_db(&db);
+        test_util::cleanup_db(&pruned_db);
     }
 
     /// team_root = 0x11,0x00…0x00,0x22, matching enostr::sns's fixed derivation

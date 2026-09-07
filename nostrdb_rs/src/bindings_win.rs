@@ -356,6 +356,7 @@ pub const NDB_PACKED_ID: u32 = 2;
 pub const NDB_NOTE_FLAG_DELETED: u32 = 1;
 pub const NDB_NOTE_FLAG_RUMOR: u32 = 2;
 pub const NDB_NOTE_FLAG_UNWRAPPED: u32 = 4;
+pub const NDB_PRUNE_DEFAULT_FILTERS: u32 = 2;
 pub const NDB_FLAG_NOMIGRATE: u32 = 1;
 pub const NDB_FLAG_SKIP_NOTE_VERIFY: u32 = 2;
 pub const NDB_FLAG_NO_FULLTEXT: u32 = 4;
@@ -5822,11 +5823,22 @@ extern "C" {
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
-    pub fn ndb_compact(
+    #[doc = " Build the default prune keep-policy: all kind-0 profiles, plus every note\n authored by one of `pubkeys`. Writes the filters into `filters` and\n reports how many in `num_filters`; size the array with\n NDB_PRUNE_DEFAULT_FILTERS, since too small a `capacity` is a failure\n rather than a truncated policy. The caller owns the filters and must\n `ndb_filter_destroy` each one. Returns 1 on success, 0 on failure, in\n which case no filter is left initialized."]
+    pub fn ndb_prune_default_filters(
+        pubkeys: *const [::std::os::raw::c_uchar; 32usize],
+        num_pubkeys: ::std::os::raw::c_int,
+        filters: *mut ndb_filter,
+        capacity: ::std::os::raw::c_int,
+        num_filters: *mut ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    #[doc = " Prune the database, copying every note matching any of `filters` to a new\n database at `output_path`. Filters are unioned, exactly as in `ndb_query`\n and `ndb_subscribe`: a note is kept when at least one filter matches it,\n and `num_filters == 0` keeps every note (a plain copy).\n\n Note that pruning rewrites notes through the writer, so note keys in the\n output database are freshly assigned and will not match the source. Which\n relays a note was seen on is not carried over either.\n\n Returns 1 on success, 0 on failure."]
+    pub fn ndb_prune(
         ndb: *mut ndb,
         output_path: *const ::std::os::raw::c_char,
-        own_pubkeys: *const [::std::os::raw::c_uchar; 32usize],
-        num_pubkeys: ::std::os::raw::c_int,
+        filters: *mut ndb_filter,
+        num_filters: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
@@ -6087,6 +6099,13 @@ extern "C" {
     pub fn ndb_filter_init_with(
         filter: *mut ndb_filter,
         pages: ::std::os::raw::c_int,
+    ) -> ::std::os::raw::c_int;
+}
+extern "C" {
+    #[doc = " Like `ndb_filter_init`, but sized so a field of `num_ids` 32-byte ids\n (authors, ids or tag values) fits. `ndb_filter_init`'s default capacity\n holds roughly 6000, which a large contact list can outgrow."]
+    pub fn ndb_filter_init_for_ids(
+        filter: *mut ndb_filter,
+        num_ids: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int;
 }
 extern "C" {
