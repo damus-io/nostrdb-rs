@@ -4,7 +4,7 @@ use std::ops::ControlFlow;
 use std::ptr;
 
 use crate::bindings::ndb_search;
-use crate::config::SubCallbackCtx;
+use crate::config::{IngestFilterCtx, SubCallbackCtx};
 use crate::{
     bindings, Blocks, Config, Error, Filter, IngestMetadata, Note, NoteKey, NoteMetadata,
     ProfileKey, ProfileRecord, QueryResult, Result, Subscription, SubscriptionState,
@@ -36,6 +36,9 @@ struct NdbRef {
     /// Keeps the subscription callback alive for as long as nostrdb can call
     /// it. Dropped after `ndb_destroy` below has joined the writer thread.
     _sub_cb: Option<Arc<SubCallbackCtx>>,
+
+    /// Same, for the ingest filter and the ingester threads.
+    _ingest_filter: Option<Arc<IngestFilterCtx>>,
 }
 
 impl std::fmt::Debug for NdbRef {
@@ -54,8 +57,9 @@ unsafe impl Sync for NdbRef {}
 impl Drop for NdbRef {
     fn drop(&mut self) {
         unsafe {
-            // Joins the writer thread, so no callback can be running once this
-            // returns. `_sub_cb` is dropped after this, in field order.
+            // Joins the ingester and writer threads, so neither callback can
+            // be running once this returns. The `Arc`s below are dropped
+            // after it, in field order.
             bindings::ndb_destroy(self.ndb);
         }
     }
@@ -157,6 +161,7 @@ impl Ndb {
         let refs = Arc::new(NdbRef {
             ndb,
             _sub_cb: config.sub_cb.clone(),
+            _ingest_filter: config.ingest_filter.clone(),
         });
 
         Ok(Ndb { refs, subs })
