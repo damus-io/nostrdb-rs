@@ -369,7 +369,18 @@ impl Relay {
 /// but ndb already held) never re-fire the subscription, so we discount them up
 /// front; only genuinely-new ids are awaited. Dropping the stream on return
 /// unsubscribes.
+///
+/// The stream is built **first**, ahead of both early returns below. A bare
+/// [`Subscription`] is only a handle: nothing releases it but
+/// [`SubscriptionStream`]'s `Drop`, so returning before that wrapper exists
+/// leaks one for the life of the `Ndb`. The `pending.is_empty()` return is not
+/// a rare path either — a relay that reports a difference it then declines to
+/// serve hits it on *every* call, because each `REQ` comes back holding only
+/// events the caller already has. See
+/// `sync_into_releases_its_subscription_when_nothing_is_pending`.
 async fn await_ingest(ndb: &Ndb, sub: Subscription, received: &[[u8; 32]]) {
+    let mut stream = SubscriptionStream::new(ndb.clone(), sub);
+
     let mut pending: HashSet<[u8; 32]> = {
         let Ok(txn) = Transaction::new(ndb) else {
             return;
@@ -384,7 +395,6 @@ async fn await_ingest(ndb: &Ndb, sub: Subscription, received: &[[u8; 32]]) {
         return;
     }
 
-    let mut stream = SubscriptionStream::new(ndb.clone(), sub);
     // A backstop deadline: localhost ingest is near-instant, but a stuck ingest
     // mustn't hang the CLI forever.
     let _ = tokio::time::timeout(INGEST_TIMEOUT, async {
@@ -419,8 +429,11 @@ fn is_benign_reject(reason: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{CONNECT_TIMEOUT, NegentropyStorageVector, RECV_TIMEOUT, Relay, is_benign_reject};
+    use futures_util::{SinkExt, StreamExt};
+    use nostrdb::{Config, Ndb, NoteBuilder, Transaction};
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};
+    use tokio_tungstenite::tungstenite::Message;
 
     /// An empty, sealed negentropy set — enough to drive [`Relay::reconcile`]'s
     /// `NEG-OPEN` so the test can exercise the read that stalls afterwards.
@@ -492,6 +505,114 @@ mod tests {
         .await
         .expect("reconcile should time out, not hang");
         assert!(result.is_err(), "silent relay must yield a reconcile Err");
+    }
+
+    /// A relay that answers every `REQ` with `frames` and then `EOSE`. Enough
+    /// wire for [`Relay::sync_into`]; it ignores the filter it is given, which
+    /// is both simpler and what a relay is free to do.
+    async fn spawn_req_relay(frames: Vec<String>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let frames = frames.clone();
+                tokio::spawn(async move {
+                    let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else {
+                        return;
+                    };
+                    while let Some(Ok(msg)) = ws.next().await {
+                        let Ok(text) = msg.into_text() else { continue };
+                        if !text.starts_with(r#"["REQ""#) {
+                            continue;
+                        }
+                        for frame in &frames {
+                            if ws.send(Message::Text(frame.clone())).await.is_err() {
+                                return;
+                            }
+                        }
+                        let _ = ws.send(Message::Text(r#"["EOSE","sync"]"#.into())).await;
+                    }
+                });
+            }
+        });
+        format!("ws://{addr}")
+    }
+
+    /// Block until `id` is queryable, without opening a subscription — this test
+    /// counts subscriptions, so its own setup must not create one.
+    fn await_stored(ndb: &Ndb, id: &[u8; 32]) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            {
+                let txn = Transaction::new(ndb).expect("txn");
+                if ndb.get_note_by_id(&txn, id).is_ok() {
+                    return;
+                }
+            }
+            assert!(std::time::Instant::now() < deadline, "note never landed");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// **`sync_into` must release its subscription however it returns.**
+    ///
+    /// `await_ingest` subscribes before the `REQ` so freshly-ingested notes wake
+    /// it, and a bare [`nostrdb::Subscription`] is released by nothing but
+    /// [`nostrdb::SubscriptionStream`]'s `Drop`. Both of its early returns —
+    /// nothing received, and everything received already stored — used to fire
+    /// before that wrapper existed, leaking one subscription per call for the
+    /// life of the `Ndb`.
+    ///
+    /// Neither is a corner. An empty `REQ` answer is the ordinary "nothing new"
+    /// case, and the all-already-stored one is what a relay produces whenever it
+    /// reports a difference it then declines to serve — so a caller reconciling
+    /// on a schedule leaks on every pass, at a rate the relay chooses.
+    ///
+    /// Asserted as a delta rather than an absolute so the setup above is not
+    /// part of the claim.
+    #[tokio::test]
+    async fn sync_into_releases_its_subscription_when_nothing_is_pending() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let ndb = Ndb::new(dir.path().to_str().expect("utf-8"), &Config::new()).expect("ndb");
+
+        let note = NoteBuilder::new()
+            .kind(1)
+            .content("the relay already gave us this")
+            .created_at(42)
+            .sign(&[0x01; 32])
+            .build()
+            .expect("note builds");
+        let id = *note.id();
+        let frame = format!(r#"["EVENT","sync",{}]"#, note.json().expect("note json"));
+
+        // Land it up front so the relay's answer below is all-already-stored.
+        ndb.process_event(&frame).expect("process");
+        await_stored(&ndb, &id);
+
+        let filter_json = r#"{"kinds":[1]}"#;
+        let baseline = ndb.subscription_count();
+
+        // 1. The relay answers with nothing at all.
+        let url = spawn_req_relay(Vec::new()).await;
+        let mut relay = Relay::connect(&url).await.expect("connect");
+        let received = relay.sync_into(&ndb, filter_json).await.expect("sync");
+        assert!(received.is_empty(), "the relay sent no events");
+        assert_eq!(
+            ndb.subscription_count(),
+            baseline,
+            "an empty REQ answer leaked a subscription"
+        );
+
+        // 2. The relay answers only with what we already hold.
+        let url = spawn_req_relay(vec![frame]).await;
+        let mut relay = Relay::connect(&url).await.expect("connect");
+        let received = relay.sync_into(&ndb, filter_json).await.expect("sync");
+        assert_eq!(received.len(), 1, "the relay sent the stored event back");
+        assert_eq!(
+            ndb.subscription_count(),
+            baseline,
+            "an all-already-stored REQ answer leaked a subscription"
+        );
     }
 
     #[test]
