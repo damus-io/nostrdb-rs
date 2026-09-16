@@ -700,12 +700,10 @@ impl Ndb {
         max_notes: u32,
         timeout: Duration,
     ) -> Result<Vec<NoteKey>> {
-        tokio::time::timeout(timeout, self.wait_for_notes(sub_id, max_notes))
+        SubscriptionStream::new(self.clone(), sub_id)
+            .notes_per_await(max_notes)
+            .wait_for_notes(1, timeout)
             .await
-            .unwrap_or(Err(Error::WaitTimeout {
-                expected: 1,
-                seen: 0,
-            }))
     }
 
     /// [`Ndb::wait_for_all_notes`] with a deadline.
@@ -722,33 +720,20 @@ impl Ndb {
     /// write that silently failed. On timeout the returned
     /// [`Error::WaitTimeout`] reports how many notes *did* arrive, which is
     /// normally enough to tell those two cases apart.
+    /// Consumes the subscription: this builds a stream per call and
+    /// [`SubscriptionStream`]'s `Drop` unsubscribes, so `sub_id` is closed by
+    /// the time it returns. To await one subscription repeatedly, hold the
+    /// stream and use [`SubscriptionStream::wait_for_notes`].
     pub async fn wait_for_all_notes_within(
         &self,
         sub_id: Subscription,
         num_notes: u32,
         timeout: Duration,
     ) -> Result<Vec<NoteKey>> {
-        let mut stream = SubscriptionStream::new(self.clone(), sub_id).notes_per_await(num_notes);
-        let mut all_notes = Vec::new();
-
-        let collect = async {
-            while all_notes.len() < num_notes as usize {
-                match stream.next().await {
-                    Some(notes) => all_notes.extend(notes),
-                    None => return Err(Error::SubscriptionError),
-                }
-            }
-            Ok(())
-        };
-
-        match tokio::time::timeout(timeout, collect).await {
-            Ok(Ok(())) => Ok(all_notes),
-            Ok(Err(err)) => Err(err),
-            Err(_elapsed) => Err(Error::WaitTimeout {
-                expected: num_notes,
-                seen: all_notes.len(),
-            }),
-        }
+        SubscriptionStream::new(self.clone(), sub_id)
+            .notes_per_await(num_notes)
+            .wait_for_notes(num_notes as usize, timeout)
+            .await
     }
 
     pub fn get_profile_by_key<'a>(
@@ -1361,6 +1346,40 @@ mod tests {
                 }
                 other => panic!("expected a WaitTimeout, got {other:?}"),
             }
+        }
+    }
+
+    /// The stream-level wait leaves the subscription open, so one stream can be
+    /// awaited repeatedly — the harness shape the `Ndb::wait_for_*` family
+    /// cannot serve, since it drops (and so unsubscribes) a stream per call.
+    #[tokio::test]
+    async fn stream_wait_for_notes_can_be_awaited_repeatedly() {
+        let db = "target/testdbs/stream_wait_repeat";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            // Both kinds, so the two awaits below can use the two distinct
+            // real, signed events this file already carries.
+            let filters = vec![Filter::new().kinds(vec![0, 1]).build()];
+            let sub = ndb.subscribe(&filters).expect("sub_id");
+            let mut stream = sub.stream(&ndb).notes_per_await(64);
+
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+            let first = stream
+                .wait_for_notes(1, Duration::from_secs(30))
+                .await
+                .expect("first note");
+            assert_eq!(first.len(), 1);
+
+            // The same stream again: this is what regressed if `Drop` ever ran.
+            ndb.process_event(r#"["EVENT","b",{  "id": "232a02ec7e1b2febf85370b52ed49bf34e2701c385c3d563511508dcf0767bcf",  "pubkey": "4a0510f26880d40e432f4865cb5714d9d3c200ca6ebb16b418ae6c555f574967",  "created_at": 1736017863,  "kind": 0,  "tags": [    [      "client",      "Damus Notedeck"    ]  ],  "content": "{\"display_name\":\"KernelKind\",\"name\":\"KernelKind\",\"about\":\"hello from notedeck!\",\"lud16\":\"kernelkind@getalby.com\"}",  "sig": "18c7dea0da3c30677d6822a31a6dfd9ebc02a18a31d69f0f2ac9ba88409e437d3db0ac433639111df1e4948a6d18451d1582173ee4fcd018d0ec92939f2c1506"}]"#).expect("process ok");
+            let second = stream
+                .wait_for_notes(1, Duration::from_secs(30))
+                .await
+                .expect("second note on the same stream");
+            assert_eq!(second.len(), 1);
+            assert_ne!(first, second, "the second await must see a different note");
         }
     }
 

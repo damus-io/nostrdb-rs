@@ -1,11 +1,12 @@
-use crate::{Ndb, NoteKey, Subscription};
+use crate::{Error, Ndb, NoteKey, Result, Subscription};
 
 use std::{
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use tracing::error;
 
 /// Used to track query futures
@@ -54,6 +55,45 @@ impl SubscriptionStream {
 
     pub fn sub_id(&self) -> Subscription {
         self.sub_id
+    }
+
+    /// Await `n` notes on this stream, summing each delivered batch, giving up
+    /// after `timeout`.
+    ///
+    /// This borrows the stream rather than building one, so the subscription
+    /// outlives the call and the same stream can be awaited again. That is the
+    /// shape a test harness needs — subscribe once, then after each write await
+    /// exactly the number of events that write produces — and it is the one
+    /// thing the [`Ndb::wait_for_all_notes_within`] family cannot do: those
+    /// build a stream per call, and this type's `Drop` unsubscribes, so a second
+    /// call against the same subscription finds it closed.
+    ///
+    /// Bounded on purpose. A local ingest commits in microseconds, so a
+    /// `timeout` of seconds is a backstop rather than a race: it trips only when
+    /// the notes are never coming, and the resulting
+    /// [`Error::WaitTimeout`] reports how many did arrive — 0 means the filter
+    /// never matched, fewer-than-`n` means `n` was wrong.
+    pub async fn wait_for_notes(&mut self, n: usize, timeout: Duration) -> Result<Vec<NoteKey>> {
+        let mut notes: Vec<NoteKey> = Vec::new();
+
+        let collect = async {
+            while notes.len() < n {
+                match self.next().await {
+                    Some(batch) => notes.extend(batch),
+                    None => return Err(Error::SubscriptionError),
+                }
+            }
+            Ok(())
+        };
+
+        match tokio::time::timeout(timeout, collect).await {
+            Ok(Ok(())) => Ok(notes),
+            Ok(Err(err)) => Err(err),
+            Err(_elapsed) => Err(Error::WaitTimeout {
+                expected: n as u32,
+                seen: notes.len(),
+            }),
+        }
     }
 }
 
