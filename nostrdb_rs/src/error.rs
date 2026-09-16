@@ -24,6 +24,9 @@ pub enum Error {
     #[error("Subscription failed")]
     SubscriptionError,
 
+    #[error("timed out waiting for {expected} note(s) on the subscription; saw {seen}")]
+    WaitTimeout { expected: u32, seen: usize },
+
     #[error("Buffer overflow")]
     BufferOverflow,
 

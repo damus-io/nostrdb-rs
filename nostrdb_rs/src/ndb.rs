@@ -28,6 +28,7 @@ use std::fs;
 use std::os::raw::c_int;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tracing::debug;
 
 struct NdbRef {
@@ -646,6 +647,12 @@ impl Ndb {
         vec.into_iter().map(NoteKey::new).collect()
     }
 
+    /// Await the next batch of notes on `sub_id`.
+    ///
+    /// Unbounded: if no matching note ever arrives this never returns. That is
+    /// usually what a long-lived consumer wants, but in a test it turns a
+    /// never-satisfied subscription into a silent hang at 0% CPU rather than a
+    /// failure — prefer [`Ndb::wait_for_notes_within`] there.
     pub async fn wait_for_notes(
         &self,
         sub_id: Subscription,
@@ -663,6 +670,10 @@ impl Ndb {
     /// subscription stream until exactly `num_notes` have been collected.
     /// `wait_for_notes` returns as soon as *any* notes are available;
     /// this function keeps awaiting until the target count is reached.
+    ///
+    /// Unbounded, with the same caveat as [`Ndb::wait_for_notes`]: a `num_notes`
+    /// the writer will never reach parks the caller forever. Prefer
+    /// [`Ndb::wait_for_all_notes_within`] in tests.
     pub async fn wait_for_all_notes(
         &self,
         sub_id: Subscription,
@@ -679,6 +690,65 @@ impl Ndb {
         }
 
         Ok(all_notes)
+    }
+
+    /// [`Ndb::wait_for_notes`] with a deadline: `Err(Error::WaitTimeout)` if no
+    /// batch arrives within `timeout`.
+    pub async fn wait_for_notes_within(
+        &self,
+        sub_id: Subscription,
+        max_notes: u32,
+        timeout: Duration,
+    ) -> Result<Vec<NoteKey>> {
+        tokio::time::timeout(timeout, self.wait_for_notes(sub_id, max_notes))
+            .await
+            .unwrap_or(Err(Error::WaitTimeout {
+                expected: 1,
+                seen: 0,
+            }))
+    }
+
+    /// [`Ndb::wait_for_all_notes`] with a deadline.
+    ///
+    /// The intended caller is a test that writes `num_notes` events and needs to
+    /// know when they have all committed: subscribe first, write, then await the
+    /// exact count. Because the count is what the writer produces rather than a
+    /// predicate over resulting state, it cannot be satisfied while trailing
+    /// events are still in flight.
+    ///
+    /// A local ingest commits in microseconds, so a `timeout` of seconds is a
+    /// backstop rather than a race: it trips only when the notes are genuinely
+    /// never coming — a filter that cannot match what the writer produced, or a
+    /// write that silently failed. On timeout the returned
+    /// [`Error::WaitTimeout`] reports how many notes *did* arrive, which is
+    /// normally enough to tell those two cases apart.
+    pub async fn wait_for_all_notes_within(
+        &self,
+        sub_id: Subscription,
+        num_notes: u32,
+        timeout: Duration,
+    ) -> Result<Vec<NoteKey>> {
+        let mut stream = SubscriptionStream::new(self.clone(), sub_id).notes_per_await(num_notes);
+        let mut all_notes = Vec::new();
+
+        let collect = async {
+            while all_notes.len() < num_notes as usize {
+                match stream.next().await {
+                    Some(notes) => all_notes.extend(notes),
+                    None => return Err(Error::SubscriptionError),
+                }
+            }
+            Ok(())
+        };
+
+        match tokio::time::timeout(timeout, collect).await {
+            Ok(Ok(())) => Ok(all_notes),
+            Ok(Err(err)) => Err(err),
+            Err(_elapsed) => Err(Error::WaitTimeout {
+                expected: num_notes,
+                seen: all_notes.len(),
+            }),
+        }
     }
 
     pub fn get_profile_by_key<'a>(
@@ -1243,6 +1313,54 @@ mod tests {
                 hex::encode(res[0].note.id()),
                 "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3"
             );
+        }
+    }
+
+    /// The bounded wait returns the notes when they arrive, exactly like the
+    /// unbounded one, so the deadline costs a well-behaved caller nothing.
+    #[tokio::test]
+    async fn wait_for_all_notes_within_returns_the_notes_it_waited_for() {
+        let db = "target/testdbs/wait_within_ok";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            let filters = vec![Filter::new().kinds(vec![1]).build()];
+            let sub = ndb.subscribe(&filters).expect("sub_id");
+
+            let waiter = ndb.wait_for_all_notes_within(sub, 1, Duration::from_secs(30));
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+
+            let res = waiter.await.expect("notes arrived before the deadline");
+            assert_eq!(res, vec![NoteKey::new(1)]);
+        }
+    }
+
+    /// A count the writer never reaches fails with the running total instead of
+    /// parking forever — the whole point of the bounded variant. Reporting `seen`
+    /// is what separates "the filter never matched" (0) from "the count was
+    /// wrong" (some, but too few).
+    #[tokio::test]
+    async fn wait_for_all_notes_within_times_out_reporting_what_it_saw() {
+        let db = "target/testdbs/wait_within_timeout";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            let filters = vec![Filter::new().kinds(vec![1]).build()];
+            let sub = ndb.subscribe(&filters).expect("sub_id");
+
+            // Ask for two notes and only ever write one.
+            let waiter = ndb.wait_for_all_notes_within(sub, 2, Duration::from_millis(250));
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+
+            match waiter.await {
+                Err(Error::WaitTimeout { expected, seen }) => {
+                    assert_eq!(expected, 2);
+                    assert_eq!(seen, 1, "the one note that did land should be reported");
+                }
+                other => panic!("expected a WaitTimeout, got {other:?}"),
+            }
         }
     }
 
