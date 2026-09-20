@@ -21,6 +21,15 @@ unsafe impl Send for RawCbCtx {}
 
 /// SAFETY: upheld by whoever poked the raw callback into the `ndb_config`.
 unsafe impl Sync for RawCbCtx {}
+
+/// How many note keys [`Ndb::poll_for_notes`] can take without touching the
+/// allocator.
+///
+/// 64 covers every `max_notes` the callers in this workspace and in notedeck
+/// poll a subscription with once a frame, at 512 bytes of stack. A larger
+/// `max_notes` — a catch-up drain rather than a frame poll — still allocates,
+/// which is proportional to the work it is about to do.
+const POLL_STACK_KEYS: usize = 64;
 use futures::StreamExt;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -630,21 +639,42 @@ impl Ndb {
         }
     }
 
+    /// Take the note keys that have arrived on `sub` since the last poll, up to
+    /// `max_notes` of them.
+    ///
+    /// Returns an empty `Vec` — which does not allocate — when nothing has
+    /// arrived. That is the answer that matters: a UI polls its subscriptions
+    /// once a frame and nearly every one of those polls is empty, so the empty
+    /// poll is the hot path and it is the one that must be free. The C call
+    /// writes into a buffer the caller owns, and for the sizes callers actually
+    /// poll with that buffer fits on the stack, so only a poll that really
+    /// found something reaches the allocator.
     pub fn poll_for_notes(&self, sub: Subscription, max_notes: u32) -> Vec<NoteKey> {
-        let mut vec = vec![];
-        vec.reserve_exact(max_notes as usize);
+        let mut stack = [0u64; POLL_STACK_KEYS];
+        let mut heap: Vec<u64>;
 
-        unsafe {
-            let res = bindings::ndb_poll_for_notes(
-                self.as_ptr(),
-                sub.id(),
-                vec.as_mut_ptr(),
-                max_notes as c_int,
-            );
-            vec.set_len(res as usize);
+        let max_notes = max_notes as usize;
+        let buf: &mut [u64] = if max_notes <= POLL_STACK_KEYS {
+            &mut stack[..max_notes]
+        } else {
+            heap = vec![0u64; max_notes];
+            &mut heap
         };
 
-        vec.into_iter().map(NoteKey::new).collect()
+        let found = unsafe {
+            bindings::ndb_poll_for_notes(
+                self.as_ptr(),
+                sub.id(),
+                buf.as_mut_ptr(),
+                buf.len() as c_int,
+            )
+        };
+
+        // Clamped rather than trusted: this is the one place a C return value
+        // decides how far into a buffer we read.
+        let found = (found.max(0) as usize).min(buf.len());
+
+        buf[..found].iter().copied().map(NoteKey::new).collect()
     }
 
     /// Await the next batch of notes on `sub_id`.
@@ -1556,6 +1586,37 @@ mod tests {
             // now we should have something
             let res = ndb.poll_for_notes(sub, 1);
             assert_eq!(res, vec![NoteKey::new(1)]);
+        }
+    }
+
+    /// `poll_for_notes` answers out of a stack buffer up to
+    /// [`POLL_STACK_KEYS`] and off the heap above it. The stack branch is what
+    /// `poll_note_works` exercises; this is the other one, so that the boundary
+    /// between them is covered rather than assumed.
+    #[tokio::test]
+    async fn poll_note_works_above_the_stack_buffer() {
+        let db = "target/testdbs/poll_above_stack";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            let filter = || Filter::new().kinds(vec![1]).build();
+
+            // Two subscriptions on the same filter: one we poll, and one whose
+            // stream tells us the writer is done, so the test does not sleep.
+            let polled = ndb.subscribe(&[filter()]).expect("sub_id");
+            let ingested = ndb.subscribe(&[filter()]).expect("sub_id");
+
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+            ndb.process_event(r#"["EVENT","b",{"id":"d7ba624865319e95f49c30f5d9644525ab2daaba4e503ecb125798ff038fef13","pubkey":"850605096dbfb50b929e38a6c26c3d56c425325c85e05de29b759bc0e5d6cebc","created_at":1732839586,"kind":1,"tags":[["e","57f1ec61f29d01e2171089aaa86a43694e05ac68507ba7b540e1b968d14f45c2","","root"],["e","77e8e33005b7139901b7e3100eff1043ea4f1faa491c678e8ba9aa3b324011d1"],["e","6eb98593d806ba5fe0ab9aa0e50591af9bbbc7874401183daf59ce788a4bf79f","","reply"],["p","1fccce68f977187c91a7091ece205e214d436eeb8049bc72e266cf4f976d8f77"],["p","32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"]],"content":"Works great on Fedora too","sig":"559ac1e852ddedd489fbfc600e4a69f1d182c57fb7dc89e0b3c385cb40ef6e4aff137a34da55b2504798171e957dd39bef57bd3bf946ee70e2eb4023bb446c8b"}]"#).expect("process ok");
+
+            ndb.wait_for_all_notes_within(ingested, 2, Duration::from_secs(5))
+                .await
+                .expect("both ingested");
+
+            let max_notes = POLL_STACK_KEYS as u32 + 1;
+            let res = ndb.poll_for_notes(polled, max_notes);
+            assert_eq!(res, vec![NoteKey::new(1), NoteKey::new(2)]);
         }
     }
 
