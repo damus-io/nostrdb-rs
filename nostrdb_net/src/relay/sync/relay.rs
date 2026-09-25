@@ -24,6 +24,20 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use super::Result;
 
+/// Upper bound, in bytes, on each negentropy message this client sends.
+///
+/// Relays cap an inbound websocket message and drop the connection past it —
+/// strfry's default `max_message_length` is 131072, and it disconnects with
+/// `1006/Websocket frame size exceeded`. Unbounded, a local set that differs from
+/// the relay's in many scattered places makes the client answer with one huge
+/// id-list frame (2 MB against relay.jb55.com for a 366k-event backfill), so every
+/// full-history reconcile of a large account died with a broken pipe. Negentropy
+/// keeps each message under this limit and spreads the rest over more rounds. The
+/// payload is hex-encoded on the wire (2x), so 60000 bytes becomes 120000 chars,
+/// leaving about 11 KB of the 131072 for the `NEG-OPEN`/`NEG-MSG` envelope and
+/// filter.
+const NEG_FRAME_SIZE_LIMIT: u64 = 60_000;
+
 /// The subscription id used for the one-shot sync and reconciliation. Arbitrary —
 /// the relay only needs it to be consistent across the session's frames.
 const SUB: &str = "sync";
@@ -141,9 +155,7 @@ impl Relay {
         filter_json: &str,
         storage: NegentropyStorageVector,
     ) -> Result<Diff> {
-        // frame_size_limit 0 = unlimited; the data is small and this is
-        // localhost, so we don't bound per-message size.
-        let mut neg = Negentropy::owned(storage, 0)?;
+        let mut neg = Negentropy::owned(storage, NEG_FRAME_SIZE_LIMIT)?;
         let initial = neg.initiate()?;
         self.ws
             .send(Message::Text(format!(

@@ -993,4 +993,92 @@ mod tests {
 
         relay_handle.shutdown();
     }
+
+    /// Ingest signed notes of `kind` into `ndb` without waiting per note — one per
+    /// `(created_at, content)` pair — then wait until all of them are queryable.
+    /// For stocking a large set quickly.
+    async fn ingest_many(ndb: &Ndb, kind: u32, notes: &[(u64, String)]) {
+        let before = count_kind(ndb, kind);
+        for (created_at, content) in notes {
+            let note = NoteBuilder::new()
+                .kind(kind)
+                .content(content)
+                .created_at(*created_at)
+                .sign(&TEST_SECKEY)
+                .build()
+                .expect("build note");
+            let frame = format!(r#"["EVENT",{}]"#, note.json().expect("json"));
+            ndb.process_client_event(&frame).expect("ingest");
+        }
+        let target = before + notes.len();
+        for _ in 0..3000 {
+            if count_kind(ndb, kind) >= target {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("bulk ingest of {} notes never settled", notes.len());
+    }
+
+    /// A reconcile must keep every frame it sends under a real relay's message
+    /// limit. strfry's default `max_message_length` is 131072 bytes and it drops
+    /// the connection on a larger frame (`1006/Websocket frame size exceeded`).
+    /// With an unbounded negentropy frame, a set that differs from the relay's in
+    /// many scattered places makes the client answer with one huge id-list frame —
+    /// 2 MB against relay.jb55.com for notedeck's 366k-envelope PNS backfill,
+    /// which broke every full-history backfill with a broken pipe. Here 3000
+    /// shared events with extras sprinkled on both sides produce a ~290 KB frame
+    /// unbounded; the hermetic relay enforces strfry's limit.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn reconcile_frames_fit_a_relay_message_limit() {
+        const KIND: u32 = 30079;
+        const SHARED: u64 = 3000;
+        const STRFRY_MAX_MESSAGE_LENGTH: usize = 131_072;
+        const BASE: u64 = 1_000_000;
+
+        let shared: Vec<(u64, String)> = (0..SHARED)
+            .map(|i| (BASE + i * 2, format!("shared-{i}")))
+            .collect();
+        // Odd timestamps interleave each side's extras between the shared events.
+        let client_only: Vec<(u64, String)> = (0..SHARED)
+            .step_by(2)
+            .map(|i| (BASE + i * 2 + 1, format!("client-{i}")))
+            .collect();
+        let relay_only: Vec<(u64, String)> = (0..SHARED)
+            .step_by(3)
+            .map(|i| (BASE + i * 2 + 1, format!("relay-{i}")))
+            .collect();
+
+        let (_rdir, relay_ndb) = temp_ndb();
+        let (_cdir, client_ndb) = temp_ndb();
+        ingest_many(&relay_ndb, KIND, &shared).await;
+        ingest_many(&relay_ndb, KIND, &relay_only).await;
+        ingest_many(&client_ndb, KIND, &shared).await;
+        ingest_many(&client_ndb, KIND, &client_only).await;
+
+        let relay_handle = crate::relay::server::spawn_with_limits(
+            relay_ndb.clone(),
+            "127.0.0.1:0".parse().expect("addr"),
+            None,
+            Some(STRFRY_MAX_MESSAGE_LENGTH),
+        )
+        .expect("spawn relay");
+
+        let mut relay = Relay::connect(&relay_handle.url()).await.expect("connect");
+        let filter_json = json!({ "kinds": [KIND], "authors": [test_author().hex()] }).to_string();
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            pull_reconcile_windowed(&mut relay, &client_ndb, &filter_json, u32::MAX as u64),
+        )
+        .await
+        .expect("reconcile settles")
+        .expect("reconcile succeeds under the relay's message limit");
+
+        assert_eq!(
+            count_kind(&client_ndb, KIND),
+            shared.len() + client_only.len() + relay_only.len(),
+            "the client pulls every relay-only event"
+        );
+        relay_handle.shutdown();
+    }
 }
