@@ -38,8 +38,9 @@ use nostrdb::{Filter, Ndb, Note, SubscriptionStream, Transaction};
 use serde_json::{Value, json};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, watch};
-use tokio_tungstenite::accept_async;
+use tokio_tungstenite::accept_async_with_config;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -71,6 +72,12 @@ struct ServerConfig {
     /// the windowed reconcile in [`sync`](super::sync) recovers from. `None`
     /// (the default) never refuses, so the relay reconciles arbitrarily large sets.
     neg_cap: Option<usize>,
+    /// Optional cap on an inbound websocket message's size, modelling strfry's
+    /// `max_message_length` (131072 on a default install). A client frame over it
+    /// fails the read and drops the connection — which the client then sees as a
+    /// broken pipe on its next write — exactly as strfry behaves. `None` (the
+    /// default) keeps tungstenite's default limit.
+    max_message_len: Option<usize>,
     /// Count of `["EVENT", …]` frames received from clients over the wire, across
     /// all connections. Lets a test observe how many events a client *pushed* (a
     /// reconcile that has converged pushes none), distinct from events seeded
@@ -134,6 +141,19 @@ pub fn spawn_with_cap(
     addr: SocketAddr,
     neg_cap: Option<usize>,
 ) -> std::io::Result<RelayHandle> {
+    spawn_with_limits(ndb, addr, neg_cap, None)
+}
+
+/// Like [`spawn_with_cap`], but also caps an inbound websocket message at
+/// `max_message_len` bytes, modelling strfry's `max_message_length`: a larger
+/// client frame drops the connection. Lets a test prove a client keeps every
+/// frame it sends under a real relay's limit. `None` keeps tungstenite's default.
+pub fn spawn_with_limits(
+    ndb: Ndb,
+    addr: SocketAddr,
+    neg_cap: Option<usize>,
+    max_message_len: Option<usize>,
+) -> std::io::Result<RelayHandle> {
     let std_listener = std::net::TcpListener::bind(addr)?;
     let local_addr = std_listener.local_addr()?;
     std_listener.set_nonblocking(true)?;
@@ -141,6 +161,7 @@ pub fn spawn_with_cap(
 
     let config = ServerConfig {
         neg_cap,
+        max_message_len,
         events_received: Arc::new(AtomicUsize::new(0)),
     };
     let events_received = config.events_received.clone();
@@ -189,7 +210,12 @@ async fn serve_connection(
     config: ServerConfig,
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> Result<(), BoxError> {
-    let ws = accept_async(stream).await?;
+    let mut ws_config = WebSocketConfig::default();
+    if let Some(max) = config.max_message_len {
+        ws_config.max_message_size = Some(max);
+        ws_config.max_frame_size = Some(max);
+    }
+    let ws = accept_async_with_config(stream, Some(ws_config)).await?;
     let (mut ws_tx, mut ws_rx) = ws.split();
 
     // Subscription tasks push frames here; the connection drains them to the
