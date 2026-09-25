@@ -83,6 +83,9 @@ struct ServerConfig {
     /// reconcile that has converged pushes none), distinct from events seeded
     /// straight into ndb, which never traverse the wire.
     events_received: Arc<AtomicUsize>,
+    /// Bumped by [`RelayHandle::drop_connections`]; each connection task watches
+    /// it and hangs up when it changes, while the accept loop keeps running.
+    kick: watch::Receiver<u64>,
 }
 
 /// A running relay. Dropping the handle (or calling [`shutdown`](Self::shutdown))
@@ -91,6 +94,7 @@ pub struct RelayHandle {
     local_addr: SocketAddr,
     shutdown: watch::Sender<bool>,
     events_received: Arc<AtomicUsize>,
+    kick: watch::Sender<u64>,
 }
 
 impl RelayHandle {
@@ -109,6 +113,14 @@ impl RelayHandle {
     /// second sync is the proof that the sync converged rather than re-flushing.
     pub fn events_received(&self) -> usize {
         self.events_received.load(Ordering::SeqCst)
+    }
+
+    /// Hang up every connected client without stopping the relay, so clients see
+    /// their connection drop and can reconnect to the same address — a relay blip,
+    /// or a laptop waking from sleep. Connections accepted afterwards are
+    /// unaffected.
+    pub fn drop_connections(&self) {
+        self.kick.send_modify(|generation| *generation += 1);
     }
 
     /// Signal the accept loop to stop.
@@ -159,10 +171,12 @@ pub fn spawn_with_limits(
     std_listener.set_nonblocking(true)?;
     let listener = TcpListener::from_std(std_listener)?;
 
+    let (kick, kick_rx) = watch::channel(0u64);
     let config = ServerConfig {
         neg_cap,
         max_message_len,
         events_received: Arc::new(AtomicUsize::new(0)),
+        kick: kick_rx,
     };
     let events_received = config.events_received.clone();
     let (shutdown, shutdown_rx) = watch::channel(false);
@@ -173,6 +187,7 @@ pub fn spawn_with_limits(
         local_addr,
         shutdown,
         events_received,
+        kick,
     })
 }
 
@@ -216,6 +231,9 @@ async fn serve_connection(
         ws_config.max_frame_size = Some(max);
     }
     let ws = accept_async_with_config(stream, Some(ws_config)).await?;
+    // Only a kick *after* this connection was accepted hangs it up.
+    let mut kick_rx = config.kick.clone();
+    kick_rx.borrow_and_update();
     let (mut ws_tx, mut ws_rx) = ws.split();
 
     // Subscription tasks push frames here; the connection drains them to the
@@ -257,6 +275,7 @@ async fn serve_connection(
                     break;
                 }
             }
+            _ = kick_rx.changed() => break,
         }
     }
 
