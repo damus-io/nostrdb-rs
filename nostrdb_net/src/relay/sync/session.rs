@@ -44,7 +44,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use nostrdb::{Filter, Ndb, SendFilter};
+use nostrdb::{Filter, IngestMetadata, Ndb, SendFilter};
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::interval;
 
@@ -243,6 +243,13 @@ struct LoopState {
     desired: HashMap<String, HashMap<String, Vec<SendFilter>>>,
     /// Publish frames queued until their target relay is connected.
     pending: HashMap<String, Vec<String>>,
+    /// Published events awaiting the relay's `OK`, keyed by `(relay url, event id
+    /// hex)` and holding the bare event JSON. When the relay acknowledges one (see
+    /// [`record_publish_ok`]) the JSON is re-ingested tagged with that relay, so
+    /// nostrdb records the relay as a seen-on source for a note we authored or
+    /// already held. Entries for a relay are dropped when its connection closes;
+    /// a re-publish after reconnect re-arms them.
+    unacked: HashMap<(String, String), String>,
     /// Backfill settle tracking (see [`Session::wait_for_sync`]): the shared
     /// done-counter the detached backfill tasks bump, paired with `started`.
     progress: Arc<BackfillProgress>,
@@ -301,11 +308,24 @@ async fn session_loop(ndb: Ndb, mut cmd_rx: mpsc::UnboundedReceiver<Cmd>) {
                     }
                 }
                 WsEvent::Message(WsMessage::Text(text)) => {
-                    // Only EVENT frames ingest; EOSE/NOTICE/OK aren't events, so a
-                    // parse/ingest failure here is expected, not an error.
-                    if let Err(e) = ndb.process_event(&text) {
+                    if text.starts_with(r#"["OK""#) {
+                        record_publish_ok(&ndb, &mut state.unacked, &ev.relay, &text);
+                        continue;
+                    }
+                    // Only EVENT frames ingest; EOSE/NOTICE aren't events, so a
+                    // parse/ingest failure here is expected, not an error. Tag the
+                    // ingest with the relay it came from so nostrdb records it as a
+                    // seen-on source — fan-out paths skip relays a note was already
+                    // seen on, and without this they would echo every synced event
+                    // straight back to the relay that sent it.
+                    if let Err(e) = ndb.process_event_with(&text, relay_ingest(&ev.relay)) {
                         tracing::trace!("session: skipped non-event relay message: {e}");
                     }
+                }
+                WsEvent::Closed | WsEvent::Error(_) => {
+                    // An `OK` can't arrive on a dead connection; forget what was
+                    // awaiting one there so the map can't grow without bound.
+                    state.unacked.retain(|(url, _), _| url != &ev.relay);
                 }
                 _ => {}
             }
@@ -388,11 +408,19 @@ fn apply_cmd(
         }
         Cmd::Publish { note_json, relays } => {
             let frame = format!(r#"["EVENT",{note_json}]"#);
+            let event_id = serde_json::from_str::<serde_json::Value>(&note_json)
+                .ok()
+                .and_then(|v| v.get("id").and_then(|id| id.as_str()).map(str::to_owned));
             for url in relays {
                 // Canonicalize so a queued frame is keyed the same way the pool
                 // reports the relay on `Opened` — otherwise it never flushes.
                 let url = RelayPool::canonicalize_url(url);
                 let _ = state.pool.add_url(url.clone(), wakeup.clone());
+                if let Some(id) = &event_id {
+                    state
+                        .unacked
+                        .insert((url.clone(), id.clone()), note_json.clone());
+                }
                 if relay_connected(&state.pool, &url) {
                     state.pool.send_to(&ClientMessage::raw(frame.clone()), &url);
                 } else {
@@ -411,6 +439,44 @@ fn apply_cmd(
                 target: state.started,
             });
         }
+    }
+}
+
+/// Ingest metadata for an event received from (or acknowledged by) `relay`, so
+/// nostrdb records the relay among the note's seen-on sources.
+fn relay_ingest(relay: &str) -> IngestMetadata {
+    IngestMetadata::new().client(false).relay(relay)
+}
+
+/// Handle a relay's `["OK", <id>, <accepted>, <reason>]` for an event this session
+/// published: if the relay now holds the event — it accepted it, or rejected it as
+/// a `duplicate:` of one it already had — re-ingest the event tagged with that
+/// relay. nostrdb already has the note, so this only adds the relay to its seen-on
+/// set, which is what stops fan-out paths re-publishing it on every run. Any other
+/// rejection just clears the pending entry.
+fn record_publish_ok(
+    ndb: &Ndb,
+    unacked: &mut HashMap<(String, String), String>,
+    relay: &str,
+    text: &str,
+) {
+    let Ok(frame) = serde_json::from_str::<Vec<serde_json::Value>>(text) else {
+        return;
+    };
+    let Some(id) = frame.get(1).and_then(|v| v.as_str()) else {
+        return;
+    };
+    let Some(note_json) = unacked.remove(&(relay.to_owned(), id.to_owned())) else {
+        return;
+    };
+    let accepted = frame.get(2).and_then(|v| v.as_bool()).unwrap_or(false);
+    let reason = frame.get(3).and_then(|v| v.as_str()).unwrap_or("");
+    if !accepted && !reason.starts_with("duplicate:") {
+        return;
+    }
+    let event = format!(r#"["EVENT","seen",{note_json}]"#);
+    if let Err(e) = ndb.process_event_with(&event, relay_ingest(relay)) {
+        tracing::debug!("session: couldn't record {relay} as seen-on for {id}: {e}");
     }
 }
 
@@ -842,6 +908,119 @@ mod tests {
         assert!(
             await_note(&ndb_b, note_id, KIND as u64, Duration::from_secs(10)).await,
             "B's live subscription should receive A's new event"
+        );
+        relay.shutdown();
+    }
+
+    /// Wait until nostrdb lists `url` among note `id`'s seen-on relays. The relay
+    /// write lands on nostrdb's writer thread with no subscription wakeup, so this
+    /// polls briefly under a `timeout` backstop. Trailing slashes are ignored, since
+    /// the pool canonicalizes urls.
+    async fn await_seen_on(ndb: &Ndb, id: [u8; 32], url: &str, timeout: Duration) -> bool {
+        let want = url.trim_end_matches('/');
+        tokio::time::timeout(timeout, async {
+            loop {
+                {
+                    let txn = Transaction::new(ndb).expect("txn");
+                    if let Ok(note) = ndb.get_note_by_id(&txn, &id) {
+                        if note
+                            .relays(&txn)
+                            .any(|seen| seen.trim_end_matches('/') == want)
+                        {
+                            return true;
+                        }
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    /// An event delivered over a [`Session`]'s live `REQ` is recorded as seen on
+    /// the relay that sent it, so a fan-out that skips already-seen relays won't
+    /// echo it straight back.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn live_event_is_recorded_as_seen_on_its_relay() {
+        let (_relay_dir, relay_ndb) = temp_ndb();
+        let relay = spawn_relay(relay_ndb.clone());
+        let url = relay.url();
+
+        let (_b_dir, ndb_b) = temp_ndb();
+        let session_b = Session::new(ndb_b.clone());
+        let live = Filter::new().kinds([KIND as u64]).build();
+        session_b.set_subscription("live", url.clone(), vec![live], vec![]);
+        session_b.wait_for_sync().await;
+
+        let (note_json, note_id) = signed_note(KIND, "seen on live");
+        relay_ndb
+            .process_client_event(&event_frame(&note_json))
+            .expect("seed relay");
+        // Seeded straight into the relay's db, so re-publish it over the wire for
+        // the live REQ to see it.
+        let (_a_dir, ndb_a) = temp_ndb();
+        let session_a = Session::new(ndb_a.clone());
+        session_a.publish(note_json, vec![url.clone()]);
+
+        assert!(
+            await_note(&ndb_b, note_id, KIND as u64, Duration::from_secs(10)).await,
+            "B should receive the event"
+        );
+        assert!(
+            await_seen_on(&ndb_b, note_id, &url, Duration::from_secs(5)).await,
+            "B should record the relay as a seen-on source of the live event"
+        );
+        relay.shutdown();
+    }
+
+    /// An event history-backfilled via negentropy (`sync_into`) is recorded as
+    /// seen on the relay it was pulled from.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn backfilled_event_is_recorded_as_seen_on_its_relay() {
+        let (_relay_dir, relay_ndb) = temp_ndb();
+        let relay = spawn_relay(relay_ndb.clone());
+        let url = relay.url();
+        let ids = seed_events(&relay_ndb, KIND, 3);
+
+        let (_b_dir, ndb_b) = temp_ndb();
+        let session_b = Session::new(ndb_b.clone());
+        let live_none = Filter::new().kinds([UNRELATED_KIND as u64]).build();
+        let history = Filter::new().kinds([KIND as u64]).build();
+        session_b.set_subscription("backfill", url.clone(), vec![live_none], vec![history]);
+        session_b.wait_for_sync().await;
+
+        for id in ids {
+            assert!(
+                await_seen_on(&ndb_b, id, &url, Duration::from_secs(5)).await,
+                "a backfilled event should record the relay as seen-on"
+            );
+        }
+        relay.shutdown();
+    }
+
+    /// A note this session publishes is recorded as seen on the relay once the
+    /// relay acknowledges it with `OK`, so a later catch-up fan-out (which skips
+    /// relays a note was seen on) doesn't publish it again on every run.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn published_event_is_recorded_as_seen_on_after_ok() {
+        let (_relay_dir, relay_ndb) = temp_ndb();
+        let relay = spawn_relay(relay_ndb.clone());
+        let url = relay.url();
+
+        let (_a_dir, ndb_a) = temp_ndb();
+        let (note_json, note_id) = signed_note(KIND, "ack me");
+        ndb_a
+            .process_client_event(&event_frame(&note_json))
+            .expect("ingest on A");
+        assert!(await_note(&ndb_a, note_id, KIND as u64, Duration::from_secs(5)).await);
+
+        let session_a = Session::new(ndb_a.clone());
+        session_a.publish(note_json, vec![url.clone()]);
+
+        assert!(
+            await_seen_on(&ndb_a, note_id, &url, Duration::from_secs(10)).await,
+            "A should record the relay as seen-on once it OKs the publish"
         );
         relay.shutdown();
     }

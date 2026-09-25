@@ -16,7 +16,7 @@ use std::time::Duration;
 use crate::NoteId;
 use futures_util::{SinkExt, StreamExt};
 use negentropy::{Negentropy, NegentropyStorageVector};
-use nostrdb::{Filter, Ndb, Subscription, SubscriptionStream, Transaction};
+use nostrdb::{Filter, IngestMetadata, Ndb, Subscription, SubscriptionStream, Transaction};
 use serde_json::Value;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
@@ -265,9 +265,12 @@ impl Relay {
             let frame: Vec<Value> = serde_json::from_str(&text)?;
             match frame.first().and_then(Value::as_str) {
                 // Relay form is ["EVENT", <sub>, <note>]; hand nostrdb the whole
-                // message verbatim so it ingests the note as received.
+                // message verbatim so it ingests the note as received, tagged with
+                // this relay so it is recorded as a seen-on source (fan-out paths
+                // rely on that to avoid re-publishing it back here).
                 Some("EVENT") => {
-                    ndb.process_event(&text)
+                    let meta = IngestMetadata::new().client(false).relay(&self.url);
+                    ndb.process_event_with(&text, meta)
                         .map_err(|e| format!("ingesting event: {e}"))?;
                     if let Some(id) = frame
                         .get(2)
