@@ -39,7 +39,7 @@
 //!   hands it to the `Send` [`pull_reconcile_windowed`](super::pull_reconcile_windowed),
 //!   whose future stays `Send` precisely because it takes no `Filter`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -106,7 +106,8 @@ impl Session {
     ///
     /// `live_filters` drive the ongoing live `REQ` (re-sent whenever the relay
     /// reconnects); `history_filters` (possibly empty) request a bounded NIP-77
-    /// negentropy backfill of past events. Both are plain nostrdb `Filter`s,
+    /// negentropy backfill of past events, re-run each time the relay reconnects so
+    /// events missed while disconnected are caught up. Both are plain nostrdb `Filter`s,
     /// converted to the sendable [`SendFilter`] here on the caller's thread before
     /// they cross to the loop — a filter carrying a custom (local-only) predicate
     /// is dropped, since it has no wire meaning. Re-declaring an existing `id`
@@ -241,6 +242,17 @@ struct LoopState {
     /// Desired live subscriptions per relay url (subid -> filters), re-sent
     /// whenever a relay (re)connects.
     desired: HashMap<String, HashMap<String, Vec<SendFilter>>>,
+    /// History filters per relay url (subid -> filters), for subscriptions that
+    /// asked for a backfill. Re-run whenever a relay *re*connects (see
+    /// [`opened`](Self::opened)): the live `REQ` re-sent on reconnect replays only
+    /// the relay's newest stored events (strfry caps a stored replay at 500), so
+    /// anything published while we were disconnected, beyond that slice, would
+    /// otherwise never arrive.
+    history: HashMap<String, HashMap<String, Vec<SendFilter>>>,
+    /// Relay urls that have reported `Opened` at least once. A later `Opened` for
+    /// one of these is a reconnect; the first is the initial connect, whose
+    /// backfill [`Cmd::SetSubscription`] already spawned.
+    opened: HashSet<String>,
     /// Publish frames queued until their target relay is connected.
     pending: HashMap<String, Vec<String>>,
     /// Published events awaiting the relay's `OK`, keyed by `(relay url, event id
@@ -300,6 +312,10 @@ async fn session_loop(ndb: Ndb, mut cmd_rx: mpsc::UnboundedReceiver<Cmd>) {
                                 .pool
                                 .send_to(&req_message(sid.clone(), filters), &ev.relay);
                         }
+                    }
+                    let reconnect = !state.opened.insert(ev.relay.clone());
+                    if reconnect {
+                        rebackfill_relay(&ndb, &mut state, &ev.relay);
                     }
                     if let Some(frames) = state.pending.remove(&ev.relay) {
                         for frame in frames {
@@ -372,31 +388,24 @@ fn apply_cmd(
                 .entry(url.clone())
                 .or_default()
                 .insert(id.clone(), live);
-            // NIP-77 negentropy history backfill, off the loop on its own task.
-            // Track its completion (via a drop guard so a panic still counts) so a
-            // `WaitForSync` barrier can observe when history has settled.
-            if !history.is_empty() {
-                let key = BackfillKey {
-                    id,
-                    url: url.clone(),
-                };
-                // Cancel any prior backfill for this exact (id, url) so a
-                // re-declaration replaces it rather than racing a duplicate
-                // reconcile (and a duplicate NEG-OPEN) against the same relay.
-                state.backfills.remove(&key);
-                state.started += 1;
-                let ndb = ndb.clone();
-                let progress = state.progress.clone();
-                let (cancel_tx, cancel_rx) = oneshot::channel();
-                tokio::spawn(async move {
-                    let _guard = BackfillDoneGuard(progress);
-                    backfill(ndb, url, history, cancel_rx).await;
-                });
-                state.backfills.insert(key, cancel_tx);
+            if history.is_empty() {
+                if let Some(subs) = state.history.get_mut(&url) {
+                    subs.remove(&id);
+                }
+            } else {
+                state
+                    .history
+                    .entry(url.clone())
+                    .or_default()
+                    .insert(id.clone(), history.clone());
+                spawn_backfill(ndb, state, id, url, history);
             }
         }
         Cmd::DropSubscription(id) => {
             for subs in state.desired.values_mut() {
+                subs.remove(&id);
+            }
+            for subs in state.history.values_mut() {
                 subs.remove(&id);
             }
             // Cancel every in-flight backfill under this id (across all relays).
@@ -439,6 +448,55 @@ fn apply_cmd(
                 target: state.started,
             });
         }
+    }
+}
+
+/// Spawn the NIP-77 negentropy history backfill for subscription `id` on `url`,
+/// off the loop on its own task. Its completion is tracked (via a drop guard, so a
+/// panic still counts) so a `WaitForSync` barrier can observe when history has
+/// settled.
+///
+/// Any prior backfill for this exact `(id, url)` is cancelled first, so a
+/// re-declaration or a reconnect replaces it rather than racing a duplicate
+/// reconcile (and a duplicate `NEG-OPEN`) against the same relay.
+fn spawn_backfill(
+    ndb: &Ndb,
+    state: &mut LoopState,
+    id: String,
+    url: String,
+    history: Vec<SendFilter>,
+) {
+    let key = BackfillKey {
+        id,
+        url: url.clone(),
+    };
+    state.backfills.remove(&key);
+    state.started += 1;
+    let ndb = ndb.clone();
+    let progress = state.progress.clone();
+    let (cancel_tx, cancel_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let _guard = BackfillDoneGuard(progress);
+        backfill(ndb, url, history, cancel_rx).await;
+    });
+    state.backfills.insert(key, cancel_tx);
+}
+
+/// Re-run the history backfill of every subscription on `relay` after it
+/// reconnects. Negentropy transfers only what we lack, so on a short blip this is
+/// a cheap no-op pass; after a long disconnect it is what fetches the events the
+/// live `REQ`'s capped replay dropped.
+fn rebackfill_relay(ndb: &Ndb, state: &mut LoopState, relay: &str) {
+    let Some(subs) = state.history.get(relay) else {
+        return;
+    };
+    let subs: Vec<(String, Vec<SendFilter>)> = subs
+        .iter()
+        .map(|(id, filters)| (id.clone(), filters.clone()))
+        .collect();
+    for (id, history) in subs {
+        tracing::debug!("session: {relay} reconnected; re-running backfill for {id}");
+        spawn_backfill(ndb, state, id, relay.to_owned(), history);
     }
 }
 
@@ -1021,6 +1079,60 @@ mod tests {
         assert!(
             await_seen_on(&ndb_a, note_id, &url, Duration::from_secs(10)).await,
             "A should record the relay as seen-on once it OKs the publish"
+        );
+        relay.shutdown();
+    }
+
+    /// A relay reconnect re-runs the subscription's history backfill. The live
+    /// `REQ` re-sent on reconnect replays only a relay's newest stored events
+    /// (strfry caps it at 500), so events published while we were away, beyond
+    /// that slice, reach us only through the backfill. Here the live filter can't
+    /// match the event at all, so only a re-run backfill can deliver it: it's added
+    /// to the relay after B's first backfill settled, then the relay drops B.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn reconnect_reruns_history_backfill() {
+        let (_relay_dir, relay_ndb) = temp_ndb();
+        let relay = spawn_relay(relay_ndb.clone());
+        let url = relay.url();
+
+        let (_b_dir, ndb_b) = temp_ndb();
+        let session_b = Session::new(ndb_b.clone());
+        let live = Filter::new().kinds([UNRELATED_KIND as u64]).build();
+        let history = Filter::new().kinds([KIND as u64]).build();
+        session_b.set_subscription("sub", url.clone(), vec![live], vec![history]);
+        session_b.wait_for_sync().await;
+
+        // Prove B's live connection is up (its first `Opened` has happened), so
+        // the drop below is a reconnect rather than the initial connect.
+        let (probe_json, probe_id) = signed_note(UNRELATED_KIND, "connected?");
+        let (_a_dir, ndb_a) = temp_ndb();
+        let session_a = Session::new(ndb_a.clone());
+        session_a.publish(probe_json, vec![url.clone()]);
+        assert!(
+            await_note(
+                &ndb_b,
+                probe_id,
+                UNRELATED_KIND as u64,
+                Duration::from_secs(10)
+            )
+            .await,
+            "B's live connection should be up"
+        );
+
+        // Published while B "wasn't looking": after its backfill, and invisible to
+        // its live filter.
+        let (missed_json, missed_id) = signed_note(KIND, "missed while away");
+        relay_ndb
+            .process_client_event(&event_frame(&missed_json))
+            .expect("seed relay");
+        assert!(await_note(&relay_ndb, missed_id, KIND as u64, Duration::from_secs(5)).await);
+
+        relay.drop_connections();
+
+        // The pool reconnects on its keepalive tick, then the backfill re-runs.
+        assert!(
+            await_note(&ndb_b, missed_id, KIND as u64, Duration::from_secs(30)).await,
+            "a reconnect should re-run the backfill and fetch the missed event"
         );
         relay.shutdown();
     }
