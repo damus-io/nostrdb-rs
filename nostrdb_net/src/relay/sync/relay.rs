@@ -103,9 +103,10 @@ impl std::fmt::Display for TooManyResults {
 impl std::error::Error for TooManyResults {}
 
 /// A *transient* reconcile/sync failure — one a retry can plausibly recover from,
-/// as opposed to a permanent refusal. It marks three cases: the relay dropped or
-/// stalled the connection mid-session, or it answered a `NEG-OPEN` with a
-/// `closed: …` NEG-ERR ("retry later"). A long-lived
+/// as opposed to a permanent refusal. It marks four cases: the relay dropped or
+/// stalled the connection mid-session (seen on a read), a write failed because the
+/// relay had already dropped it, or it answered a `NEG-OPEN` with a `closed: …`
+/// NEG-ERR ("retry later"). A long-lived
 /// [`Session`](super::Session)'s backfill loop downcasts to this to decide whether
 /// to back off and try again, versus give up on a permanent error (a `blocked: …`
 /// NEG-ERR, a relay that doesn't speak NIP-77, a malformed frame). Distinct from
@@ -157,12 +158,11 @@ impl Relay {
     ) -> Result<Diff> {
         let mut neg = Negentropy::owned(storage, NEG_FRAME_SIZE_LIMIT)?;
         let initial = neg.initiate()?;
-        self.ws
-            .send(Message::Text(format!(
-                r#"["NEG-OPEN","{SUB}",{filter_json},"{}"]"#,
-                hex::encode(&initial)
-            )))
-            .await?;
+        self.send_text(format!(
+            r#"["NEG-OPEN","{SUB}",{filter_json},"{}"]"#,
+            hex::encode(&initial)
+        ))
+        .await?;
 
         let mut diff = Diff {
             need: Vec::new(),
@@ -190,12 +190,11 @@ impl Relay {
                     match reply {
                         // More ranges to probe — answer and keep going.
                         Some(reply) => {
-                            self.ws
-                                .send(Message::Text(format!(
-                                    r#"["NEG-MSG","{SUB}","{}"]"#,
-                                    hex::encode(&reply)
-                                )))
-                                .await?;
+                            self.send_text(format!(
+                                r#"["NEG-MSG","{SUB}","{}"]"#,
+                                hex::encode(&reply)
+                            ))
+                            .await?;
                         }
                         // Nothing left to ask: reconciliation is complete.
                         None => break,
@@ -241,9 +240,7 @@ impl Relay {
                 }
             }
         }
-        self.ws
-            .send(Message::Text(format!(r#"["NEG-CLOSE","{SUB}"]"#)))
-            .await?;
+        self.send_text(format!(r#"["NEG-CLOSE","{SUB}"]"#)).await?;
         Ok(diff)
     }
 
@@ -267,8 +264,7 @@ impl Relay {
             ndb.subscribe(std::slice::from_ref(&filter))?
         };
 
-        self.ws
-            .send(Message::Text(format!(r#"["REQ","{SUB}",{filter_json}]"#)))
+        self.send_text(format!(r#"["REQ","{SUB}",{filter_json}]"#))
             .await?;
 
         let mut received = Vec::new();
@@ -298,9 +294,7 @@ impl Relay {
                 _ => {}
             }
         }
-        self.ws
-            .send(Message::Text(format!(r#"["CLOSE","{SUB}"]"#)))
-            .await?;
+        self.send_text(format!(r#"["CLOSE","{SUB}"]"#)).await?;
 
         await_ingest(ndb, sub, &received).await;
         Ok(received)
@@ -317,7 +311,7 @@ impl Relay {
     /// drop the old id we still hold.
     pub async fn publish(&mut self, frames: &[String]) -> Result<()> {
         for frame in frames {
-            self.ws.send(Message::Text(frame.clone())).await?;
+            self.send_text(frame.clone()).await?;
         }
         let mut acked = 0;
         while acked < frames.len() {
@@ -335,6 +329,19 @@ impl Relay {
             }
         }
         Ok(())
+    }
+
+    /// Send one text frame. A failed write means the relay dropped the connection
+    /// under us — strfry disconnecting over an oversize frame surfaces here as
+    /// `Broken pipe` — so it's typed [`Transient`], like a failed read in
+    /// [`next_text`](Self::next_text): a session backfill retries the pass on a
+    /// fresh connection instead of skipping the filter as a permanent failure (and
+    /// then failing every later filter on the same dead socket).
+    async fn send_text(&mut self, text: String) -> Result<()> {
+        self.ws
+            .send(Message::Text(text))
+            .await
+            .map_err(|e| Transient(format!("{}: websocket write error: {e}", self.url)).into())
     }
 
     /// Await the next text frame, skipping pings/binary.
@@ -369,9 +376,7 @@ impl Relay {
     /// Cheap and best-effort: sending it when no session is open (or to a relay that
     /// already forgot one) is a harmless no-op per NIP-77.
     pub async fn close_negentropy(&mut self) -> Result<()> {
-        self.ws
-            .send(Message::Text(format!(r#"["NEG-CLOSE","{SUB}"]"#)))
-            .await?;
+        self.send_text(format!(r#"["NEG-CLOSE","{SUB}"]"#)).await?;
         Ok(())
     }
 }
@@ -443,7 +448,9 @@ fn is_benign_reject(reason: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{CONNECT_TIMEOUT, NegentropyStorageVector, RECV_TIMEOUT, Relay, is_benign_reject};
+    use super::{
+        CONNECT_TIMEOUT, NegentropyStorageVector, RECV_TIMEOUT, Relay, Transient, is_benign_reject,
+    };
     use futures_util::{SinkExt, StreamExt};
     use nostrdb::{Config, Ndb, NoteBuilder, Transaction};
     use std::time::Duration;
@@ -520,6 +527,37 @@ mod tests {
         .await
         .expect("reconcile should time out, not hang");
         assert!(result.is_err(), "silent relay must yield a reconcile Err");
+    }
+
+    /// A write to a relay that has dropped the connection is [`Transient`], like a
+    /// failed read. strfry disconnecting over an oversize frame reached the client
+    /// as `Broken pipe` on its next write, which was typed permanent, so a session
+    /// backfill skipped the filter instead of retrying — and then failed every
+    /// later filter the same way on the dead socket.
+    #[tokio::test]
+    async fn write_to_dropped_connection_is_transient() {
+        // Upgrade, then drop the socket at once: the relay is gone.
+        let url = spawn_silent(|stream| async move {
+            let _ = tokio_tungstenite::accept_async(stream).await;
+        })
+        .await;
+        let mut relay = Relay::connect(&url).await.expect("websocket upgrade");
+
+        // The first writes can land in the kernel buffer before the peer's reset
+        // comes back, so keep writing until one fails.
+        let mut err = None;
+        for _ in 0..100 {
+            if let Err(e) = relay.send_text(r#"["REQ","sync",{}]"#.to_string()).await {
+                err = Some(e);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let err = err.expect("a write to a dropped connection must eventually fail");
+        assert!(
+            err.downcast_ref::<Transient>().is_some(),
+            "a failed write must be Transient so a backfill retries it: {err}"
+        );
     }
 
     /// A relay that answers every `REQ` with `frames` and then `EOSE`. Enough
