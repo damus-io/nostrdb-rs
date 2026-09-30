@@ -621,6 +621,50 @@ mod tests {
         );
     }
 
+    /// A rumor over 32KB, sealed by the Rust `nostr` crate, unwraps in nostrdb.
+    /// Both NIP-44 layers are past 32768 bytes here: the seal carries the 40KB
+    /// rumor, and the wrap carries the seal's base64 of it. nostrdb's C `unpad`
+    /// used to compute the padded length in `uint16_t`, which wraps above 32768,
+    /// so it rejected spec-padded payloads of 32769..57344 bytes ("padding size
+    /// is wrong") and the rumor never appeared.
+    #[tokio::test]
+    async fn rumor_over_32kb_unwraps() {
+        use nostrdb::{Config, Filter, Ndb, Transaction};
+
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let ndb = Ndb::new(dir.path().to_str().unwrap(), &Config::new()).expect("ndb");
+        assert!(ndb.add_team_root(&test_root()));
+
+        let member = FullKeypair::generate();
+        let keys = derive_sns_keys(&test_root()).expect("keys");
+        let content = "x".repeat(40_000);
+        let rumor = NoteBuilder::new()
+            .kind(1)
+            .content(&content)
+            .created_at(1700000000)
+            .sign(&member.secret_key.secret_bytes())
+            .build()
+            .expect("note");
+        let rjson = rumor.json().expect("rjson");
+        let envelope = wrap_rumor(&keys, &member, &rjson, 1700000000).expect("envelope");
+        let ejson = envelope.json().expect("ejson");
+
+        let sub = ndb
+            .subscribe(&[Filter::new().kinds(vec![1]).build()])
+            .expect("sub");
+        let waiter = ndb.wait_for_all_notes_within(sub, 1, std::time::Duration::from_secs(10));
+        ndb.process_event(&format!("[\"EVENT\",\"big\",{ejson}]"))
+            .expect("ingest envelope");
+        waiter.await.expect("a 40KB rumor unwraps");
+
+        let txn = Transaction::new(&ndb).expect("txn");
+        let ones = ndb
+            .query(&txn, &[Filter::new().kinds(vec![1]).build()], 1)
+            .expect("query");
+        assert!(ones[0].note.is_rumor());
+        assert_eq!(ones[0].note.content(), content);
+    }
+
     /// A migrated board is many envelopes (its definition plus every card). If
     /// they all land before the team root is registered, a single `process_sns`
     /// catch-up — what notedeck's `register_teams` runs after `add_team_root` —
