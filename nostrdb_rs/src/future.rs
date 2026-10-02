@@ -48,6 +48,11 @@ impl SubscriptionStream {
 
     /// Unsubscribe the subscription when this stream goes out of scope. On
     /// by default. Recommended unless you want subscription leaks.
+    ///
+    /// Turn it off when the subscription belongs to something that outlives
+    /// the stream: the subscription stays open after the drop, notes that
+    /// arrive meanwhile queue up for the next poll or stream, and closing it
+    /// is then the owner's job ([`Ndb::unsubscribe`]).
     pub fn unsubscribe_on_drop(mut self, yes: bool) -> Self {
         self.unsubscribe_on_drop = yes;
         self
@@ -99,12 +104,17 @@ impl SubscriptionStream {
 
 impl Drop for SubscriptionStream {
     fn drop(&mut self) {
-        // Perform cleanup here, like removing the subscription from the global map
+        // This stream's waker goes with it whether or not the subscription
+        // does; a later stream on the same subscription registers its own.
         {
             let mut map = self.ndb.subs.lock().unwrap();
             map.remove(&self.sub_id);
         }
-        // unsubscribe
+
+        if !self.unsubscribe_on_drop {
+            return;
+        }
+
         if let Err(err) = self.ndb.unsubscribe(self.sub_id) {
             error!(
                 "Error unsubscribing from {} in SubscriptionStream Drop: {err}",

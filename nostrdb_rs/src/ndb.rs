@@ -683,6 +683,21 @@ impl Ndb {
     /// usually what a long-lived consumer wants, but in a test it turns a
     /// never-satisfied subscription into a silent hang at 0% CPU rather than a
     /// failure — prefer [`Ndb::wait_for_notes_within`] there.
+    ///
+    /// # Unsubscribes
+    ///
+    /// This closes `sub_id`. The wait runs on a [`SubscriptionStream`] built
+    /// for the call, and dropping that stream unsubscribes, so once this
+    /// returns — with notes, with an error, or because the future was dropped
+    /// — the subscription is gone. [`Subscription`] is `Copy`, so the caller
+    /// still holds the id, but a second wait on it never sees another note:
+    /// the unbounded waits park forever and the bounded ones time out with
+    /// `seen: 0`. Every `Ndb::wait_for_*` method behaves this way.
+    ///
+    /// That suits the one-shot caller (subscribe, write, wait once), which
+    /// gets its cleanup for free. To await one subscription more than once,
+    /// hold the stream yourself — `sub.stream(&ndb)` — and call
+    /// [`SubscriptionStream::wait_for_notes`] on it as often as you need.
     pub async fn wait_for_notes(
         &self,
         sub_id: Subscription,
@@ -704,6 +719,11 @@ impl Ndb {
     /// Unbounded, with the same caveat as [`Ndb::wait_for_notes`]: a `num_notes`
     /// the writer will never reach parks the caller forever. Prefer
     /// [`Ndb::wait_for_all_notes_within`] in tests.
+    ///
+    /// # Unsubscribes
+    ///
+    /// Closes `sub_id` on return, as [`Ndb::wait_for_notes`] explains; a
+    /// second wait on the same subscription hangs.
     pub async fn wait_for_all_notes(
         &self,
         sub_id: Subscription,
@@ -724,6 +744,11 @@ impl Ndb {
 
     /// [`Ndb::wait_for_notes`] with a deadline: `Err(Error::WaitTimeout)` if no
     /// batch arrives within `timeout`.
+    ///
+    /// # Unsubscribes
+    ///
+    /// Closes `sub_id` on return, as [`Ndb::wait_for_notes`] explains; a
+    /// second wait on the same subscription times out with `seen: 0`.
     pub async fn wait_for_notes_within(
         &self,
         sub_id: Subscription,
@@ -750,10 +775,13 @@ impl Ndb {
     /// write that silently failed. On timeout the returned
     /// [`Error::WaitTimeout`] reports how many notes *did* arrive, which is
     /// normally enough to tell those two cases apart.
-    /// Consumes the subscription: this builds a stream per call and
-    /// [`SubscriptionStream`]'s `Drop` unsubscribes, so `sub_id` is closed by
-    /// the time it returns. To await one subscription repeatedly, hold the
-    /// stream and use [`SubscriptionStream::wait_for_notes`].
+    ///
+    /// # Unsubscribes
+    ///
+    /// Closes `sub_id` on return, as [`Ndb::wait_for_notes`] explains; a
+    /// second wait on the same subscription times out with `seen: 0`. A test
+    /// that writes in several steps and waits after each one wants
+    /// [`SubscriptionStream::wait_for_notes`] instead.
     pub async fn wait_for_all_notes_within(
         &self,
         sub_id: Subscription,
@@ -1410,6 +1438,70 @@ mod tests {
                 .expect("second note on the same stream");
             assert_eq!(second.len(), 1);
             assert_ne!(first, second, "the second await must see a different note");
+        }
+    }
+
+    /// What the `# Unsubscribes` doc on [`Ndb::wait_for_notes`] promises: the
+    /// wait closes its subscription, and a second wait on the id the caller
+    /// still holds sees nothing even though a matching note lands. The bounded
+    /// wait stands in for the second one so the trap shows up as `seen: 0`
+    /// rather than as this test hanging.
+    #[tokio::test]
+    async fn wait_for_notes_unsubscribes_on_return() {
+        let db = "target/testdbs/wait_unsubscribes";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            let filters = vec![Filter::new().kinds(vec![0, 1]).build()];
+            let sub = ndb.subscribe(&filters).expect("sub_id");
+            let open = ndb.subscription_count();
+
+            let waiter = ndb.wait_for_notes(sub, 1);
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+            waiter.await.expect("first note");
+            assert_eq!(ndb.subscription_count(), open - 1, "the wait closed it");
+
+            let waiter = ndb.wait_for_notes_within(sub, 1, Duration::from_millis(250));
+            ndb.process_event(r#"["EVENT","b",{  "id": "232a02ec7e1b2febf85370b52ed49bf34e2701c385c3d563511508dcf0767bcf",  "pubkey": "4a0510f26880d40e432f4865cb5714d9d3c200ca6ebb16b418ae6c555f574967",  "created_at": 1736017863,  "kind": 0,  "tags": [    [      "client",      "Damus Notedeck"    ]  ],  "content": "{\"display_name\":\"KernelKind\",\"name\":\"KernelKind\",\"about\":\"hello from notedeck!\",\"lud16\":\"kernelkind@getalby.com\"}",  "sig": "18c7dea0da3c30677d6822a31a6dfd9ebc02a18a31d69f0f2ac9ba88409e437d3db0ac433639111df1e4948a6d18451d1582173ee4fcd018d0ec92939f2c1506"}]"#).expect("process ok");
+            match waiter.await {
+                Err(Error::WaitTimeout { seen, .. }) => assert_eq!(seen, 0),
+                other => panic!("a closed subscription delivered {other:?}"),
+            }
+        }
+    }
+
+    /// With `unsubscribe_on_drop(false)` the stream hands its subscription
+    /// back when it goes: still open, and a note that lands in between is
+    /// waiting for the next stream on it.
+    #[tokio::test]
+    async fn stream_without_unsubscribe_on_drop_leaves_the_subscription_open() {
+        let db = "target/testdbs/stream_keep_sub";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            let filters = vec![Filter::new().kinds(vec![0, 1]).build()];
+            let sub = ndb.subscribe(&filters).expect("sub_id");
+            let open = ndb.subscription_count();
+
+            let mut stream = sub.stream(&ndb).unsubscribe_on_drop(false);
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+            let first = stream
+                .wait_for_notes(1, Duration::from_secs(30))
+                .await
+                .expect("first note");
+            drop(stream);
+            assert_eq!(ndb.subscription_count(), open, "the drop left it open");
+
+            // Lands while no stream is listening.
+            ndb.process_event(r#"["EVENT","b",{  "id": "232a02ec7e1b2febf85370b52ed49bf34e2701c385c3d563511508dcf0767bcf",  "pubkey": "4a0510f26880d40e432f4865cb5714d9d3c200ca6ebb16b418ae6c555f574967",  "created_at": 1736017863,  "kind": 0,  "tags": [    [      "client",      "Damus Notedeck"    ]  ],  "content": "{\"display_name\":\"KernelKind\",\"name\":\"KernelKind\",\"about\":\"hello from notedeck!\",\"lud16\":\"kernelkind@getalby.com\"}",  "sig": "18c7dea0da3c30677d6822a31a6dfd9ebc02a18a31d69f0f2ac9ba88409e437d3db0ac433639111df1e4948a6d18451d1582173ee4fcd018d0ec92939f2c1506"}]"#).expect("process ok");
+            let second = sub
+                .stream(&ndb)
+                .wait_for_notes(1, Duration::from_secs(30))
+                .await
+                .expect("the note that landed between streams");
+            assert_ne!(first, second);
         }
     }
 
