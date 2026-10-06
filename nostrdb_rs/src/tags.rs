@@ -23,7 +23,7 @@ impl<'n> Tag<'n> {
                 ind as ::std::os::raw::c_int,
             )
         };
-        NdbStr::new(nstr, self.note.clone())
+        NdbStr::new(nstr, self.note.borrowed())
     }
 
     pub fn get_str(&self, ind: u16) -> Option<&'n str> {
@@ -70,7 +70,7 @@ impl<'a> IntoIterator for Tags<'a> {
     type IntoIter = TagsIter<'a>;
 
     fn into_iter(self) -> TagsIter<'a> {
-        TagsIter::new(self.note().clone())
+        TagsIter::new(self.note().borrowed())
     }
 }
 
@@ -84,7 +84,7 @@ impl<'a> Tags<'a> {
     }
 
     pub fn iter(&self) -> TagsIter<'a> {
-        TagsIter::new(self.note.clone())
+        TagsIter::new(self.note.borrowed())
     }
 
     pub fn note(&self) -> &Note<'a> {
@@ -121,7 +121,7 @@ impl<'a> TagsIter<'a> {
         if tag_ptr.is_null() {
             None
         } else {
-            Some(Tag::new(tag_ptr, self.note().clone()))
+            Some(Tag::new(tag_ptr, self.note().borrowed()))
         }
     }
 
@@ -186,7 +186,53 @@ impl<'a> Iterator for TagsIter<'a> {
 mod tests {
     use crate::config::Config;
     use crate::test_util;
-    use crate::{Filter, Ndb, NdbStrVariant, Transaction};
+    use crate::{Filter, Ndb, NdbStrVariant, NoteBuilder, Transaction};
+
+    /// Tag strings of an owned (builder-made) note point into that note, not
+    /// into a copy freed when the tag drops. Checked by address, so it fails
+    /// deterministically rather than only under an allocator that reuses the
+    /// freed copy.
+    #[test]
+    fn owned_note_tag_strs_point_into_the_note() {
+        let note = NoteBuilder::new()
+            .kind(1)
+            .content("")
+            .start_tag()
+            .tag_str("d")
+            .tag_str("session-alpha")
+            .start_tag()
+            .tag_str("title")
+            .tag_str("First")
+            .sign(&[7u8; 32])
+            .build()
+            .expect("note");
+        let start = note.as_ptr() as usize;
+        let end = start + note.size();
+
+        let mut values = Vec::new();
+        for tag in note.tags() {
+            for elem in tag {
+                values.push(elem.str().expect("str"));
+            }
+        }
+        // each tag (and NdbStr) above has dropped by now
+        assert_eq!(values, ["d", "session-alpha", "title", "First"]);
+        for value in &values[1..] {
+            let addr = value.as_ptr() as usize;
+            assert!(
+                (start..end).contains(&addr),
+                "{value:?} points outside its note"
+            );
+        }
+
+        let title = note
+            .tags()
+            .iter()
+            .find(|t| t.get_str(0) == Some("title"))
+            .and_then(|t| t.get_str(1))
+            .expect("title");
+        assert!((start..end).contains(&(title.as_ptr() as usize)));
+    }
 
     #[tokio::test]
     async fn tag_iter_works() {

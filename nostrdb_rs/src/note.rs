@@ -311,7 +311,26 @@ impl<'a> Note<'a> {
     #[inline]
     pub fn tags(&self) -> Tags<'a> {
         let tags = unsafe { bindings::ndb_note_tags(self.as_ptr()) };
-        Tags::new(tags, self.clone())
+        Tags::new(tags, self.borrowed())
+    }
+
+    /// A non-owning handle on this note, for the tag accessors to hold.
+    ///
+    /// [`Clone`] deep-copies an [`Owned`](Note::Owned) note. Tags used to
+    /// hold such a copy, so every string a tag returned pointed into a copy
+    /// that was freed as soon as the tag (or its [`NdbStr`](crate::NdbStr))
+    /// dropped: a use-after-free that glibc happened to tolerate and macOS's
+    /// allocator did not. An owned note is borrowed as
+    /// [`Unowned`](Note::Unowned) instead, so tag strings point into this
+    /// note's own memory, the same memory [`content`](Self::content) returns.
+    /// The other variants are already cheap pointer copies.
+    pub(crate) fn borrowed(&self) -> Note<'a> {
+        match self {
+            Note::Owned { ptr, .. } => Note::Unowned {
+                ptr: unsafe { &**ptr },
+            },
+            other => other.clone(),
+        }
     }
 
     #[inline]
