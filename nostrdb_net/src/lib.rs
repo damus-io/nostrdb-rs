@@ -4,6 +4,7 @@ mod filter;
 mod keypair;
 mod note;
 pub mod pns;
+pub mod private_note;
 mod profile;
 mod pubkey;
 pub mod relay;
