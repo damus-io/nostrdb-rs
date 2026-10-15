@@ -400,6 +400,58 @@ mod tests {
         test_util::cleanup_db(&db);
     }
 
+    /// A damus.io link that follows some text must parse into a bech32
+    /// mention spanning only the bech32 string. The length used to be
+    /// measured from the start of the content, so the block ran past the
+    /// end of the note.
+    #[test]
+    fn damus_io_link_after_text() {
+        let db = "target/testdbs/damus_io_link_after_text";
+        test_util::cleanup_db(&db);
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            ndb.process_event("[\"EVENT\",\"s\",{\"id\":\"d224d3032d7f5edf72386329588b20e697dc4c0239f9a11868ec603c6a033ddf\",\"pubkey\":\"32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245\",\"created_at\":1792089215,\"kind\":1,\"tags\":[[\"client\",\"Damus Notedeck\"],[\"e\",\"a53146d9e4dd484f89cb1c3288a39740c1e2a33ff5fe717f10fb21c307ed8f32\",\"\",\"root\"],[\"e\",\"8b357b463e53edaead9f32c7a7fd7b316622dfde6d697aed6adc61b499dd3613\",\"\",\"reply\"],[\"p\",\"32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245\"],[\"p\",\"52b4a076bcbbbdc3a1aefa3735816cf74993b1b8db202b01c883c58be7fad8bd\"],[\"p\",\"75656740209960c74fe373e6943f8a21ab896889d8691276a60f86aadbc8f92a\"]],\"content\":\"you replied to it lol https://damus.io/nevent1qqs9dv73nxyk6mywyxt073wc4dyr4h302ekvwfc3r2njzazdawfj5mcpz9mhxue69uhkummnw3ezumrpdejz7qgkwaehxw309aex2mrp0yhxg6t5w3hjuur4vghskww9lc\",\"sig\":\"db0250b76f78657b79c199d8d9500a525cfeb7373760ef63e33ebd377f8001e71770272a829b7ae4608199a3184656aa496e0a15cf1fe6fa77162210faf62b2c\"}]").expect("process ok");
+        }
+
+        {
+            let ndb = Ndb::new(db, &Config::new()).expect("ndb");
+            let id: [u8; 32] =
+                hex::decode("d224d3032d7f5edf72386329588b20e697dc4c0239f9a11868ec603c6a033ddf")
+                    .expect("hex id")
+                    .try_into()
+                    .expect("id bytes");
+            let txn = Transaction::new(&ndb).expect("txn");
+            let note = ndb.get_note_by_id(&txn, &id).unwrap();
+            let blocks = ndb
+                .get_blocks_by_key(&txn, note.key().unwrap())
+                .expect("blocks");
+
+            let mut c = 0;
+            for block in blocks.iter(&note) {
+                match c {
+                    0 => {
+                        assert_eq!(block.blocktype(), BlockType::Text);
+                        assert_eq!(block.as_str(), "you replied to it lol ");
+                    }
+
+                    1 => {
+                        assert_eq!(block.blocktype(), BlockType::MentionBech32);
+                        assert_eq!(block.as_str(), "nevent1qqs9dv73nxyk6mywyxt073wc4dyr4h302ekvwfc3r2njzazdawfj5mcpz9mhxue69uhkummnw3ezumrpdejz7qgkwaehxw309aex2mrp0yhxg6t5w3hjuur4vghskww9lc");
+                        assert!(matches!(block.as_mention(), Some(Mention::Event(_))));
+                    }
+
+                    _ => assert!(false),
+                }
+
+                c += 1;
+            }
+            assert_eq!(c, 2);
+        }
+
+        test_util::cleanup_db(&db);
+    }
+
     #[test]
     fn nprofile_relays_work() {
         let db = "target/testdbs/nprofile_relays";
