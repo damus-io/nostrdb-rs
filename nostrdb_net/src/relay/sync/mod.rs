@@ -12,6 +12,7 @@
 //! a filter, and a predicate naming which kinds are addressable (latest-wins,
 //! keyed per `(kind, d-tag)`) so stale revisions aren't re-pushed forever.
 
+mod progress;
 mod relay;
 mod session;
 
@@ -22,7 +23,10 @@ use negentropy::{Id, NegentropyStorageVector};
 use nostrdb::{Config, Filter, Ndb, Note, Transaction};
 use serde_json::json;
 
+pub use progress::{Progress, SyncEvent};
 pub use relay::{Diff, Relay, TooManyResults, Transient};
+
+use progress::Coverage;
 pub use session::Session;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -69,33 +73,41 @@ pub async fn reconcile_sync(
     filter: &Filter,
     is_addressable: &dyn Fn(u32) -> bool,
 ) -> Result<()> {
+    reconcile_sync_with_progress(relay, ndb, author, kinds, filter, is_addressable, &()).await
+}
+
+/// [`reconcile_sync`], reporting each step of the sync to `progress` (see
+/// [`SyncEvent`]): the negentropy rounds, the need count, every fetch chunk, the
+/// push, and — on the windowed path a cap refusal routes to — each window's
+/// coverage and every bisection. The NIP-01 fallback reports its fetch and push.
+pub async fn reconcile_sync_with_progress<P: Progress + ?Sized>(
+    relay: &mut Relay,
+    ndb: &Ndb,
+    author: &Pubkey,
+    kinds: &[u32],
+    filter: &Filter,
+    is_addressable: &dyn Fn(u32) -> bool,
+    progress: &P,
+) -> Result<()> {
     let wire = json!({ "kinds": kinds, "authors": [author.hex()] });
     match relay
-        .reconcile(&wire.to_string(), local_set(ndb, filter)?)
+        .reconcile_with_progress(&wire.to_string(), local_set(ndb, filter)?, progress)
         .await
     {
         Ok(diff) => {
+            progress.event(SyncEvent::Need {
+                count: diff.need.len(),
+            });
             // Pull missing events by id. The relay caps a single `REQ`'s stored
             // replay, so fetch in chunks rather than one oversized filter.
-            for chunk in diff.need.chunks(ID_FETCH_CHUNK) {
-                let ids: Vec<String> = chunk.iter().map(hex::encode).collect();
-                // sync_into returns only once the received events are queryable.
-                relay
-                    .sync_into(ndb, &json!({ "ids": ids }).to_string())
-                    .await?;
-            }
+            fetch_ids(relay, ndb, &diff.need, progress).await?;
 
             // Push events the relay is missing (e.g. edits made offline).
             // Best-effort: a rejected flush (or a dropped connection mid-push)
             // mustn't abort the command.
             let have: HashSet<[u8; 32]> = diff.have.iter().copied().collect();
             let pending = frames_where(ndb, filter, is_addressable, |id| have.contains(id));
-            if !pending.is_empty() {
-                match relay.publish(&pending).await {
-                    Ok(()) => eprintln!("flushed {} local event(s) to the relay", pending.len()),
-                    Err(e) => eprintln!("warning: couldn't flush local events: {e}"),
-                }
-            }
+            push_best_effort(relay, &pending, progress).await;
         }
         // A cap refusal — the filter matches more events than the relay's
         // per-sync negentropy cap (strfry `maxSyncEvents`), so it streams no
@@ -106,7 +118,8 @@ pub async fn reconcile_sync(
         // on every run, never converging. Route it to the windowed path instead.
         Err(e) if e.downcast_ref::<TooManyResults>().is_some() => {
             if let Err(e) =
-                reconcile_sync_windowed(relay, ndb, author, kinds, filter, is_addressable).await
+                reconcile_sync_windowed(relay, ndb, author, kinds, filter, is_addressable, progress)
+                    .await
             {
                 eprintln!("warning: windowed reconcile failed: {e}");
             }
@@ -117,12 +130,61 @@ pub async fn reconcile_sync(
         // worse, hanging. If even that fails, warn and carry on against the cache.
         Err(e) => {
             eprintln!("warning: negentropy reconcile unavailable: {e}");
-            if let Err(e) = fallback_sync(relay, ndb, kinds, author, filter, is_addressable).await {
+            if let Err(e) =
+                fallback_sync(relay, ndb, kinds, author, filter, is_addressable, progress).await
+            {
                 eprintln!("warning: fallback sync failed: {e}");
             }
         }
     }
     Ok(())
+}
+
+/// Pull the events with these `ids` into `ndb` in [`ID_FETCH_CHUNK`]-sized `REQ`s
+/// (the relay caps a single `REQ`'s stored replay), reporting each landed chunk
+/// as a [`SyncEvent::Fetched`]. `sync_into` returns only once the received events
+/// are queryable, so a reported chunk is readable.
+///
+/// `Send` whenever `P: Sync`: it holds only ids, wire strings and `&P` across its
+/// awaits.
+async fn fetch_ids<P: Progress + ?Sized>(
+    relay: &mut Relay,
+    ndb: &Ndb,
+    ids: &[[u8; 32]],
+    progress: &P,
+) -> Result<()> {
+    for chunk in ids.chunks(ID_FETCH_CHUNK) {
+        let ids: Vec<String> = chunk.iter().map(hex::encode).collect();
+        let fetched = relay
+            .sync_into(ndb, &json!({ "ids": ids }).to_string())
+            .await?;
+        progress.event(SyncEvent::Fetched {
+            count: fetched.len(),
+        });
+    }
+    Ok(())
+}
+
+/// Push `pending` frames to the relay, best-effort: a rejected flush (or a dropped
+/// connection mid-push) is warned rather than returned, so it never aborts the
+/// command. A landed push is reported as a [`SyncEvent::Pushed`].
+async fn push_best_effort<P: Progress + ?Sized>(
+    relay: &mut Relay,
+    pending: &[String],
+    progress: &P,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    match relay.publish(pending).await {
+        Ok(()) => {
+            progress.event(SyncEvent::Pushed {
+                count: pending.len(),
+            });
+            eprintln!("flushed {} local event(s) to the relay", pending.len())
+        }
+        Err(e) => eprintln!("warning: couldn't flush local events: {e}"),
+    }
 }
 
 /// Upper bound for a windowed reconcile's `created_at` search: `u32::MAX` (unix
@@ -162,15 +224,17 @@ const RECONCILE_UNTIL: u64 = u32::MAX as u64;
 /// window-local winner and re-flush it forever. Collecting the relay-missing ids
 /// across every window first, then pushing the global winners among them, keeps
 /// the dedup intact and the reconcile converging.
-async fn reconcile_sync_windowed(
+async fn reconcile_sync_windowed<P: Progress + ?Sized>(
     relay: &mut Relay,
     ndb: &Ndb,
     author: &Pubkey,
     kinds: &[u32],
     filter: &Filter,
     is_addressable: &dyn Fn(u32) -> bool,
+    progress: &P,
 ) -> Result<()> {
     let base = json!({ "kinds": kinds, "authors": [author.hex()] });
+    let mut coverage = Coverage::until_now(0, RECONCILE_UNTIL);
 
     // A LIFO stack of `created_at` windows still to reconcile, and the union of
     // the ids the relay is missing across every in-cap window (pushed once at the
@@ -190,7 +254,10 @@ async fn reconcile_sync_windowed(
         };
         let local = local_set(ndb, &Filter::from_json(&window_json)?)?;
 
-        let diff = match relay.reconcile(&window_json, local).await {
+        let diff = match relay
+            .reconcile_with_progress(&window_json, local, progress)
+            .await
+        {
             Ok(diff) => diff,
             // Recoverable cap refusal: bisect this window and retry each half,
             // recursing until each is under the cap. A one-second (or empty)
@@ -203,8 +270,13 @@ async fn reconcile_sync_windowed(
                     tracing::warn!(
                         "windowed reconcile: window [{since},{until}] over cap at min width; REQ fallback"
                     );
-                    relay.sync_into(ndb, &window_json).await?;
+                    let fetched = relay.sync_into(ndb, &window_json).await?;
+                    progress.event(SyncEvent::Fetched {
+                        count: fetched.len(),
+                    });
+                    coverage.finish(since, until, progress);
                 } else {
+                    progress.event(SyncEvent::Split);
                     let mid = since + (until - since) / 2;
                     windows.push((since, mid));
                     windows.push((mid + 1, until));
@@ -217,25 +289,19 @@ async fn reconcile_sync_windowed(
 
         // Pull the ids the relay holds that we lack, chunked under its single-`REQ`
         // replay cap.
-        for chunk in diff.need.chunks(ID_FETCH_CHUNK) {
-            let ids: Vec<String> = chunk.iter().map(hex::encode).collect();
-            relay
-                .sync_into(ndb, &json!({ "ids": ids }).to_string())
-                .await?;
-        }
+        progress.event(SyncEvent::Need {
+            count: diff.need.len(),
+        });
+        fetch_ids(relay, ndb, &diff.need, progress).await?;
         have.extend(diff.have);
+        coverage.finish(since, until, progress);
     }
 
     // Push the events the relay is missing, deduped to their winning revision
     // across the whole set. Best-effort: a rejected flush (or a dropped connection
     // mid-push) mustn't abort the command.
     let pending = frames_where(ndb, filter, is_addressable, |id| have.contains(id));
-    if !pending.is_empty() {
-        match relay.publish(&pending).await {
-            Ok(()) => eprintln!("flushed {} local event(s) to the relay", pending.len()),
-            Err(e) => eprintln!("warning: couldn't flush local events: {e}"),
-        }
-    }
+    push_best_effort(relay, &pending, progress).await;
     Ok(())
 }
 
@@ -266,26 +332,40 @@ pub async fn pull_reconcile(
     filter_json: &str,
     local: NegentropyStorageVector,
 ) -> Result<()> {
+    pull_reconcile_with_progress(relay, ndb, filter_json, local, &()).await
+}
+
+/// [`pull_reconcile`], reporting its negentropy rounds, need count and fetches to
+/// `progress` (see [`SyncEvent`]). `Send` whenever `P: Sync`.
+pub async fn pull_reconcile_with_progress<P: Progress + ?Sized>(
+    relay: &mut Relay,
+    ndb: &Ndb,
+    filter_json: &str,
+    local: NegentropyStorageVector,
+    progress: &P,
+) -> Result<()> {
     // Collapse the reconcile `Result` (its `Box<dyn Error>` is `!Send`) into a
     // `Send` `Option` before any further await. `None` means the relay can't
     // reconcile, so fall back to a plain NIP-01 `REQ` of the same filter.
-    let need = match relay.reconcile(filter_json, local).await {
+    let need = match relay
+        .reconcile_with_progress(filter_json, local, progress)
+        .await
+    {
         Ok(diff) => Some(diff.need),
         Err(_) => None,
     };
     match need {
         Some(need) => {
+            progress.event(SyncEvent::Need { count: need.len() });
             // Pull the ids the relay holds that we lack, chunked under the
             // relay's single-`REQ` replay cap.
-            for chunk in need.chunks(ID_FETCH_CHUNK) {
-                let ids: Vec<String> = chunk.iter().map(hex::encode).collect();
-                relay
-                    .sync_into(ndb, &json!({ "ids": ids }).to_string())
-                    .await?;
-            }
+            fetch_ids(relay, ndb, &need, progress).await?;
         }
         None => {
-            relay.sync_into(ndb, filter_json).await?;
+            let fetched = relay.sync_into(ndb, filter_json).await?;
+            progress.event(SyncEvent::Fetched {
+                count: fetched.len(),
+            });
         }
     }
     Ok(())
@@ -322,6 +402,23 @@ pub async fn pull_reconcile_windowed(
     base_filter_json: &str,
     until_now: u64,
 ) -> Result<()> {
+    pull_reconcile_windowed_with_progress(relay, ndb, base_filter_json, until_now, &()).await
+}
+
+/// [`pull_reconcile_windowed`], reporting each step to `progress` (see
+/// [`SyncEvent`]): every window's negentropy rounds, need count and fetches, a
+/// [`SyncEvent::Split`] per bisection, and a [`SyncEvent::Window`] as each window
+/// finishes, whose coverage reaches its span when the whole range has synced.
+///
+/// `Send` whenever `P: Sync`, so a long-lived session can drive it on a
+/// multi-thread runtime with an atomic or channel-backed observer.
+pub async fn pull_reconcile_windowed_with_progress<P: Progress + ?Sized>(
+    relay: &mut Relay,
+    ndb: &Ndb,
+    base_filter_json: &str,
+    until_now: u64,
+    progress: &P,
+) -> Result<()> {
     let base: serde_json::Value = serde_json::from_str(base_filter_json)?;
     // The caller's own bounds clamp the search; absent an explicit `until`, cover
     // up to `until_now`.
@@ -336,6 +433,7 @@ pub async fn pull_reconcile_windowed(
 
     // A LIFO stack of `created_at` windows still to reconcile.
     let mut windows = vec![(base_since, base_until)];
+    let mut coverage = Coverage::until_now(base_since, base_until);
     while let Some((since, until)) = windows.pop() {
         // Reduce this window to wire JSON + a sealed local set *synchronously*, so
         // the transient `Filter` never crosses the reconcile await below.
@@ -354,19 +452,19 @@ pub async fn pull_reconcile_windowed(
         // the error across the awaits below would make this future `!Send`. `Ok`
         // carries the ids to pull; `Err(())` flags the recoverable cap refusal; a
         // fatal (non-cap) error propagates here and now, with no await after it.
-        let need = match relay.reconcile(&window_json, local).await {
+        let need = match relay
+            .reconcile_with_progress(&window_json, local, progress)
+            .await
+        {
             Ok(diff) => Ok(diff.need),
             Err(e) if e.downcast_ref::<TooManyResults>().is_some() => Err(()),
             Err(e) => return Err(e),
         };
         match need {
             Ok(need) => {
-                for chunk in need.chunks(ID_FETCH_CHUNK) {
-                    let ids: Vec<String> = chunk.iter().map(hex::encode).collect();
-                    relay
-                        .sync_into(ndb, &json!({ "ids": ids }).to_string())
-                        .await?;
-                }
+                progress.event(SyncEvent::Need { count: need.len() });
+                fetch_ids(relay, ndb, &need, progress).await?;
+                coverage.finish(since, until, progress);
             }
             Err(()) => {
                 if until <= since + 1 {
@@ -377,8 +475,13 @@ pub async fn pull_reconcile_windowed(
                     tracing::warn!(
                         "windowed reconcile: window [{since},{until}] over cap at min width; REQ fallback"
                     );
-                    relay.sync_into(ndb, &window_json).await?;
+                    let fetched = relay.sync_into(ndb, &window_json).await?;
+                    progress.event(SyncEvent::Fetched {
+                        count: fetched.len(),
+                    });
+                    coverage.finish(since, until, progress);
                 } else {
+                    progress.event(SyncEvent::Split);
                     let mid = since + (until - since) / 2;
                     windows.push((since, mid));
                     windows.push((mid + 1, until));
@@ -402,11 +505,34 @@ pub async fn connect_and_sync(
     filter: &Filter,
     is_addressable: &dyn Fn(u32) -> bool,
 ) -> Result<Option<Relay>> {
+    connect_and_sync_with_progress(relay_url, ndb, author, kinds, filter, is_addressable, &()).await
+}
+
+/// [`connect_and_sync`], reporting the reconcile's steps to `progress` (see
+/// [`reconcile_sync_with_progress`]).
+pub async fn connect_and_sync_with_progress<P: Progress + ?Sized>(
+    relay_url: &str,
+    ndb: &Ndb,
+    author: &Pubkey,
+    kinds: &[u32],
+    filter: &Filter,
+    is_addressable: &dyn Fn(u32) -> bool,
+    progress: &P,
+) -> Result<Option<Relay>> {
     let relay = match Relay::connect(relay_url).await {
         // The app being closed is the common case, not an error worth warning
         // about — fall back to the local cache quietly.
         Ok(mut relay) => {
-            reconcile_sync(&mut relay, ndb, author, kinds, filter, is_addressable).await?;
+            reconcile_sync_with_progress(
+                &mut relay,
+                ndb,
+                author,
+                kinds,
+                filter,
+                is_addressable,
+                progress,
+            )
+            .await?;
             Some(relay)
         }
         Err(e) => {
@@ -534,22 +660,29 @@ fn d_tag(note: &Note) -> Option<String> {
 /// ingest it, then push any local event the relay didn't return. O(document) on
 /// the wire instead of O(difference), but it keeps the CLI working against plain
 /// NIP-01 relays (or a notedeck whose relay predates negentropy).
-async fn fallback_sync(
+async fn fallback_sync<P: Progress + ?Sized>(
     relay: &mut Relay,
     ndb: &Ndb,
     kinds: &[u32],
     author: &Pubkey,
     filter: &Filter,
     is_addressable: &dyn Fn(u32) -> bool,
+    progress: &P,
 ) -> Result<()> {
     let wire = json!({ "kinds": kinds, "authors": [author.hex()] });
     // sync_into returns only once the received events are queryable.
     let received = relay.sync_into(ndb, &wire.to_string()).await?;
+    progress.event(SyncEvent::Fetched {
+        count: received.len(),
+    });
 
     let on_relay: HashSet<[u8; 32]> = received.into_iter().collect();
     let pending = frames_where(ndb, filter, is_addressable, |id| !on_relay.contains(id));
     if !pending.is_empty() {
         relay.publish(&pending).await?;
+        progress.event(SyncEvent::Pushed {
+            count: pending.len(),
+        });
         eprintln!("flushed {} local event(s) to the relay", pending.len());
     }
     Ok(())
@@ -943,13 +1076,29 @@ mod tests {
         let mut relay = Relay::connect(&relay_handle.url()).await.expect("connect");
 
         // First reconcile: pull the 10 relay-only down, push the 10 client-only up.
+        let rec = Recorder::default();
         tokio::time::timeout(
             Duration::from_secs(30),
-            reconcile_sync(&mut relay, &client_ndb, &author, &kinds, &filter, &is_addr),
+            reconcile_sync_with_progress(
+                &mut relay,
+                &client_ndb,
+                &author,
+                &kinds,
+                &filter,
+                &is_addr,
+                &rec,
+            ),
         )
         .await
         .expect("first reconcile settles")
         .expect("first reconcile ok");
+
+        // The windowed path reports what it did: the pull, the push, and a range
+        // whose coverage completes.
+        assert_eq!(rec.fetched(), RELAY_ONLY as usize, "fetched = relay-only");
+        assert_eq!(rec.pushed(), CLIENT_ONLY as usize, "pushed = client-only");
+        assert!(rec.splits() > 0, "an over-cap range must bisect");
+        rec.assert_coverage_completes();
 
         assert_eq!(
             count_kind(&client_ndb, KIND),
@@ -990,6 +1139,210 @@ mod tests {
             total,
             "no spurious growth on the converged run"
         );
+
+        relay_handle.shutdown();
+    }
+
+    /// A [`Progress`] that records every event, for asserting on what a sync
+    /// reported. `RefCell`, so it is `!Sync` — fine for a test that awaits the sync
+    /// in place rather than spawning it.
+    #[derive(Default)]
+    struct Recorder(std::cell::RefCell<Vec<SyncEvent>>);
+
+    impl Progress for Recorder {
+        fn event(&self, ev: SyncEvent) {
+            self.0.borrow_mut().push(ev);
+        }
+    }
+
+    impl Recorder {
+        /// Total events reported as fetched.
+        fn fetched(&self) -> usize {
+            self.0
+                .borrow()
+                .iter()
+                .map(|ev| match ev {
+                    SyncEvent::Fetched { count } => *count,
+                    _ => 0,
+                })
+                .sum()
+        }
+
+        /// Total ids the reconciles reported as needed.
+        fn needed(&self) -> usize {
+            self.0
+                .borrow()
+                .iter()
+                .map(|ev| match ev {
+                    SyncEvent::Need { count } => *count,
+                    _ => 0,
+                })
+                .sum()
+        }
+
+        /// Total events reported as pushed.
+        fn pushed(&self) -> usize {
+            self.0
+                .borrow()
+                .iter()
+                .map(|ev| match ev {
+                    SyncEvent::Pushed { count } => *count,
+                    _ => 0,
+                })
+                .sum()
+        }
+
+        /// How many windows were bisected.
+        fn splits(&self) -> usize {
+            self.0
+                .borrow()
+                .iter()
+                .filter(|ev| **ev == SyncEvent::Split)
+                .count()
+        }
+
+        /// The windows' coverage never shrinks, never passes its span, and ends
+        /// at exactly the span — the whole range was reconciled.
+        fn assert_coverage_completes(&self) {
+            let windows: Vec<(u64, u64)> = self
+                .0
+                .borrow()
+                .iter()
+                .filter_map(|ev| match ev {
+                    SyncEvent::Window {
+                        covered_secs,
+                        span_secs,
+                    } => Some((*covered_secs, *span_secs)),
+                    _ => None,
+                })
+                .collect();
+            let &(last_covered, span) = windows.last().expect("at least one window");
+            assert!(span > 0, "the clamped span is non-empty");
+            assert!(
+                windows
+                    .windows(2)
+                    .all(|w| w[0].0 <= w[1].0 && w[0].1 == w[1].1),
+                "coverage is monotonic over a fixed span: {windows:?}"
+            );
+            assert_eq!(last_covered, span, "the last window completes the range");
+        }
+    }
+
+    /// A `Sync` observer — atomics, so a sync driven on a multi-thread runtime
+    /// can report into it.
+    #[derive(Default)]
+    struct SyncCounter {
+        fetched: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Progress for SyncCounter {
+        fn event(&self, ev: SyncEvent) {
+            if let SyncEvent::Fetched { count } = ev {
+                self.fetched
+                    .fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+
+    fn assert_send<T: Send>(_: T) {}
+
+    /// Compile-time check: with a `Sync` observer the windowed pull stays `Send`,
+    /// so a session can still `tokio::spawn` it. Never called — it only has to
+    /// type-check.
+    #[allow(dead_code)]
+    fn windowed_pull_with_sync_progress_is_send(relay: &mut Relay, ndb: &Ndb, p: &SyncCounter) {
+        assert_send(pull_reconcile_windowed_with_progress(
+            relay, ndb, "{}", 0, p,
+        ));
+        assert_send(pull_reconcile_with_progress(
+            relay,
+            ndb,
+            "{}",
+            NegentropyStorageVector::new(),
+            p,
+        ));
+    }
+
+    /// A windowed pull over a set larger than the relay's cap reports progress
+    /// that adds up: every pulled event shows up once in the need counts and once
+    /// in the fetches, the over-cap range bisects, and the window coverage ends at
+    /// 100%. A [`SyncCounter`] fed from the same run agrees.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn windowed_pull_reports_progress() {
+        const KIND: u32 = 30080;
+        const CAP: usize = 20;
+        const BASE: u64 = 1_000_000;
+        const SHARED: u64 = 15;
+        const RELAY_ONLY: u64 = 45;
+
+        let shared: Vec<(u64, String)> = (0..SHARED)
+            .map(|i| (BASE + i, format!("shared-{i}")))
+            .collect();
+        let relay_only: Vec<(u64, String)> = (0..RELAY_ONLY)
+            .map(|i| (BASE + 100 + i, format!("relayonly-{i}")))
+            .collect();
+
+        let (_rdir, relay_ndb) = temp_ndb();
+        let (_cdir, client_ndb) = temp_ndb();
+        ingest_many(&relay_ndb, KIND, &shared).await;
+        ingest_many(&relay_ndb, KIND, &relay_only).await;
+        ingest_many(&client_ndb, KIND, &shared).await;
+
+        let relay_handle = crate::relay::server::spawn_with_cap(
+            relay_ndb.clone(),
+            "127.0.0.1:0".parse().expect("addr"),
+            Some(CAP),
+        )
+        .expect("spawn relay");
+
+        let mut relay = Relay::connect(&relay_handle.url()).await.expect("connect");
+        let filter_json = json!({ "kinds": [KIND], "authors": [test_author().hex()] }).to_string();
+
+        /// Fans one sync's events out to both observers under test.
+        struct Both<'a>(&'a Recorder, &'a SyncCounter);
+        impl Progress for Both<'_> {
+            fn event(&self, ev: SyncEvent) {
+                self.0.event(ev);
+                self.1.event(ev);
+            }
+        }
+        let rec = Recorder::default();
+        let counter = SyncCounter::default();
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            pull_reconcile_windowed_with_progress(
+                &mut relay,
+                &client_ndb,
+                &filter_json,
+                u32::MAX as u64,
+                &Both(&rec, &counter),
+            ),
+        )
+        .await
+        .expect("pull settles")
+        .expect("pull ok");
+
+        // What the pull actually brought in, not RELAY_ONLY: nostrdb's `until`
+        // is exclusive (`created_at < until`) while the bisection assumes NIP-01's
+        // inclusive bound, so an event sitting exactly on a split's `until` is
+        // matched by neither side's window and skipped. That is a defect of the
+        // windowing, not of the progress reporting this test covers, which must
+        // agree with whatever landed.
+        let n = count_kind(&client_ndb, KIND) - SHARED as usize;
+        assert!(n > 0, "the pull fetched something");
+        assert_eq!(rec.needed(), n, "need counts sum to what was pulled");
+        assert_eq!(rec.fetched(), n, "fetches sum to what was pulled");
+        assert_eq!(
+            counter.fetched.load(std::sync::atomic::Ordering::Relaxed),
+            n,
+            "the Sync observer sees the same fetches"
+        );
+        assert!(rec.splits() > 0, "an over-cap range must bisect");
+        assert!(
+            rec.0.borrow().contains(&SyncEvent::Round),
+            "negentropy rounds are reported"
+        );
+        rec.assert_coverage_completes();
 
         relay_handle.shutdown();
     }

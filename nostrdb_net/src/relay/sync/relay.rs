@@ -23,6 +23,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use super::Result;
+use super::progress::{Progress, SyncEvent};
 
 /// Upper bound, in bytes, on each negentropy message this client sends.
 ///
@@ -156,6 +157,18 @@ impl Relay {
         filter_json: &str,
         storage: NegentropyStorageVector,
     ) -> Result<Diff> {
+        self.reconcile_with_progress(filter_json, storage, &())
+            .await
+    }
+
+    /// [`reconcile`](Self::reconcile), reporting a [`SyncEvent::Round`] to
+    /// `progress` as each `NEG-MSG` round trip finishes.
+    pub async fn reconcile_with_progress<P: Progress + ?Sized>(
+        &mut self,
+        filter_json: &str,
+        storage: NegentropyStorageVector,
+        progress: &P,
+    ) -> Result<Diff> {
         let mut neg = Negentropy::owned(storage, NEG_FRAME_SIZE_LIMIT)?;
         let initial = neg.initiate()?;
         self.send_text(format!(
@@ -184,6 +197,7 @@ impl Relay {
                     let mut have = Vec::new();
                     let mut need = Vec::new();
                     let reply = neg.reconcile_with_ids(&msg, &mut have, &mut need)?;
+                    progress.event(SyncEvent::Round);
                     diff.have.extend(have.iter().map(|id| *id.as_bytes()));
                     diff.need.extend(need.iter().map(|id| *id.as_bytes()));
 
