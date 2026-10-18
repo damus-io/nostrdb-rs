@@ -27,7 +27,7 @@ pub use progress::{Progress, SyncEvent};
 pub use relay::{Diff, Relay, TooManyResults, Transient};
 
 use progress::Coverage;
-pub use session::Session;
+pub use session::{BackfillStatus, Session};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 

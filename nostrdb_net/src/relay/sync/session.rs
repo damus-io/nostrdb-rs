@@ -45,10 +45,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use nostrdb::{Filter, IngestMetadata, Ndb, SendFilter};
-use tokio::sync::{Notify, mpsc, oneshot};
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::time::interval;
 
-use super::{Relay, Transient, pull_reconcile_windowed};
+use super::{Progress, Relay, SyncEvent, Transient, pull_reconcile_windowed_with_progress};
 use crate::{ClientMessage, RelayPool, RelayStatus, WsEvent, WsMessage};
 
 /// How often the loop pings/reconnects relays to keep the pool alive.
@@ -87,6 +87,43 @@ const BACKFILL_UNTIL: u64 = u32::MAX as u64;
 /// See the [module docs](self) for the loop shape and the `!Send` discipline.
 pub struct Session {
     cmd_tx: mpsc::UnboundedSender<Cmd>,
+    /// The loop's backfill status, cloned out by [`backfill_status`](Self::backfill_status).
+    /// This copy is never read, so it only keeps the channel's receiving side alive.
+    status: watch::Receiver<BackfillStatus>,
+}
+
+/// A snapshot of a [`Session`]'s history backfills, published on a `watch`
+/// channel (see [`Session::backfill_status`]) so a caller can show how far the
+/// sync has got, and whether it gave up, instead of waiting on it blind.
+///
+/// Counts are cumulative over the session's life and across every backfill
+/// (each subscription, each relay, each reconnect re-run).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BackfillStatus {
+    /// Backfill tasks started so far.
+    pub started: u64,
+    /// Backfill tasks finished so far, however they ended. Equal to `started`
+    /// when nothing is in flight.
+    pub done: u64,
+    /// Events fetched across all backfills.
+    pub fetched: u64,
+    /// Ids the reconciles asked to fetch, summed over every reconcile (each
+    /// window of each filter). `fetched / need` is the determinate fraction; a
+    /// window too dense to bisect is pulled with a plain `REQ` and reports no
+    /// need, so `fetched` can run slightly past it.
+    pub need: u64,
+    /// `created_at` windows finished.
+    pub windows: u64,
+    /// Coverage of the latest finished window's pull: `created_at` seconds
+    /// reconciled so far out of its whole range, the range clamped to now (see
+    /// [`SyncEvent::Window`]).
+    pub covered_secs: u64,
+    pub span_secs: u64,
+    /// At least one backfill ended without completing: it gave up after
+    /// [`BACKFILL_MAX_ATTEMPTS`] transient failures, or a filter failed
+    /// permanently (a `blocked: …` NEG-ERR, a relay without NIP-77). A cancelled
+    /// backfill is not a failure; it was replaced or no longer wanted.
+    pub failed: bool,
 }
 
 impl Session {
@@ -98,8 +135,23 @@ impl Session {
     /// Tokio runtime, as it `tokio::spawn`s the loop.
     pub fn new(ndb: Ndb) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-        tokio::spawn(session_loop(ndb, cmd_rx));
-        Self { cmd_tx }
+        let progress = Arc::new(BackfillProgress::default());
+        let status = progress.status.subscribe();
+        tokio::spawn(session_loop(ndb, cmd_rx, progress));
+        Self { cmd_tx, status }
+    }
+
+    /// Watch the session's history backfills: `borrow()` is the latest
+    /// [`BackfillStatus`], and `changed()` resolves on the next update after this
+    /// call. Cloned off the handle, so it needs no round trip through the loop.
+    ///
+    /// The status settles (`done == started`) by the time
+    /// [`wait_for_sync`](Self::wait_for_sync) resolves for those backfills, so a
+    /// caller can read `failed` straight after the wait.
+    pub fn backfill_status(&self) -> watch::Receiver<BackfillStatus> {
+        let mut rx = self.status.clone();
+        rx.borrow_and_update();
+        rx
     }
 
     /// Declare (upsert) a subscription `id` targeting one relay `url`.
@@ -202,10 +254,52 @@ enum Cmd {
 /// panic all count, via a drop guard — so a settle wait can never hang on a task
 /// that died. `notify` wakes waiters on each completion. The started count is held
 /// loop-locally (only the loop spawns backfills), so it needs no atomic.
-#[derive(Default)]
+///
+/// `status` publishes the [`BackfillStatus`] snapshot. The backfill tasks report
+/// into it through this struct's [`Progress`] impl; `send_modify` never blocks a
+/// reader, who only ever borrows the latest value.
 struct BackfillProgress {
     done: AtomicU64,
     notify: Notify,
+    status: watch::Sender<BackfillStatus>,
+}
+
+impl Default for BackfillProgress {
+    fn default() -> Self {
+        Self {
+            done: AtomicU64::new(0),
+            notify: Notify::new(),
+            status: watch::Sender::new(BackfillStatus::default()),
+        }
+    }
+}
+
+impl BackfillProgress {
+    /// Record that a backfill ended without completing (see
+    /// [`BackfillStatus::failed`]).
+    fn fail(&self) {
+        self.status.send_modify(|s| s.failed = true);
+    }
+}
+
+/// The backfill tasks' observer: folds each reconcile step into the published
+/// [`BackfillStatus`]. `Sync`, so the backfill future stays `Send`.
+impl Progress for BackfillProgress {
+    fn event(&self, ev: SyncEvent) {
+        match ev {
+            SyncEvent::Need { count } => self.status.send_modify(|s| s.need += count as u64),
+            SyncEvent::Fetched { count } => self.status.send_modify(|s| s.fetched += count as u64),
+            SyncEvent::Window {
+                covered_secs,
+                span_secs,
+            } => self.status.send_modify(|s| {
+                s.windows += 1;
+                s.covered_secs = covered_secs;
+                s.span_secs = span_secs;
+            }),
+            SyncEvent::Round | SyncEvent::Pushed { .. } | SyncEvent::Split => {}
+        }
+    }
 }
 
 /// A one-shot settle handle: resolves once the tracked history backfill(s) have
@@ -290,14 +384,21 @@ struct BackfillKey {
 /// The background relay loop: owns the [`RelayPool`], ingests inbound events into
 /// `ndb`, and applies [`Cmd`]s. Returns when the command channel closes (the
 /// [`Session`] handle dropped).
-async fn session_loop(ndb: Ndb, mut cmd_rx: mpsc::UnboundedReceiver<Cmd>) {
+async fn session_loop(
+    ndb: Ndb,
+    mut cmd_rx: mpsc::UnboundedReceiver<Cmd>,
+    progress: Arc<BackfillProgress>,
+) {
     let notify = Arc::new(Notify::new());
     let wakeup = {
         let notify = notify.clone();
         move || notify.notify_one()
     };
 
-    let mut state = LoopState::default();
+    let mut state = LoopState {
+        progress,
+        ..LoopState::default()
+    };
     let mut keepalive = interval(KEEPALIVE_INTERVAL);
 
     loop {
@@ -472,12 +573,15 @@ fn spawn_backfill(
     };
     state.backfills.remove(&key);
     state.started += 1;
+    state.progress.status.send_modify(|s| s.started += 1);
     let ndb = ndb.clone();
     let progress = state.progress.clone();
     let (cancel_tx, cancel_rx) = oneshot::channel();
     tokio::spawn(async move {
-        let _guard = BackfillDoneGuard(progress);
-        backfill(ndb, url, history, cancel_rx).await;
+        let _guard = BackfillDoneGuard(progress.clone());
+        if let BackfillEnd::Failed = backfill(ndb, url, history, cancel_rx, &progress).await {
+            progress.fail();
+        }
     });
     state.backfills.insert(key, cancel_tx);
 }
@@ -546,6 +650,8 @@ struct BackfillDoneGuard(Arc<BackfillProgress>);
 
 impl Drop for BackfillDoneGuard {
     fn drop(&mut self) {
+        // Status first, so a settle waiter woken by `done` reads a final status.
+        self.0.status.send_modify(|s| s.done += 1);
         self.0.done.fetch_add(1, Ordering::Release);
         self.0.notify.notify_waiters();
     }
@@ -571,7 +677,7 @@ fn relay_connected(pool: &RelayPool, url: &str) -> bool {
 ///
 /// Each attempt opens a dedicated reconcile connection (separate from the live
 /// pool) and, for each history filter, reconciles the relay against the local db
-/// and fetches the ids the relay holds that we lack — via [`pull_reconcile_windowed`],
+/// and fetches the ids the relay holds that we lack — via [`pull_reconcile_windowed`](super::pull_reconcile_windowed),
 /// so a filter matching more events than the relay's per-sync cap still syncs (it
 /// bisects the `created_at` range under the cap).
 ///
@@ -586,12 +692,16 @@ fn relay_connected(pool: &RelayPool, url: &str) -> bool {
 /// a re-declaration). When it fires mid-reconcile the task emits a `NEG-CLOSE` on
 /// its connection before returning, so the relay stops tracking the negentropy
 /// session rather than leaving it half-open until it times out.
+///
+/// Each reconcile step is reported to `progress`, and the returned [`BackfillEnd`]
+/// says whether the history synced in full.
 async fn backfill(
     ndb: Ndb,
     url: String,
     filters: Vec<SendFilter>,
     mut cancel: oneshot::Receiver<()>,
-) {
+    progress: &BackfillProgress,
+) -> BackfillEnd {
     // Reduce every filter to its wire JSON once, up front and synchronously: the
     // transient `nostrdb::Filter` from `as_filter()` (`!Send`) drops inside the
     // closure, so it never crosses an await, and the resulting `Vec<String>` is
@@ -603,29 +713,46 @@ async fn backfill(
         .collect();
 
     for attempt in 1..=BACKFILL_MAX_ATTEMPTS {
-        match backfill_once(&ndb, &url, &filter_jsons, &mut cancel).await {
-            BackfillOutcome::Done | BackfillOutcome::Cancelled => return,
+        match backfill_once(&ndb, &url, &filter_jsons, &mut cancel, progress).await {
+            BackfillOutcome::Done => return BackfillEnd::Complete,
+            BackfillOutcome::Incomplete => return BackfillEnd::Failed,
+            BackfillOutcome::Cancelled => return BackfillEnd::Cancelled,
             BackfillOutcome::Retry => {}
         }
         if attempt == BACKFILL_MAX_ATTEMPTS {
             tracing::warn!("session backfill: {url}: giving up after {attempt} attempts");
-            return;
+            return BackfillEnd::Failed;
         }
         // Back off before the next attempt, but abandon the wait at once if the
         // backfill is cancelled meanwhile.
         let delay = BACKFILL_RETRY_BASE * 2u32.pow(attempt - 1);
         tokio::select! {
             biased;
-            _ = &mut cancel => return,
+            _ = &mut cancel => return BackfillEnd::Cancelled,
             _ = tokio::time::sleep(delay) => {}
         }
     }
+    BackfillEnd::Failed
+}
+
+/// How a whole [`backfill`] task ended, so the spawn site can flag
+/// [`BackfillStatus::failed`].
+enum BackfillEnd {
+    /// Every filter reconciled.
+    Complete,
+    /// Gave up after [`BACKFILL_MAX_ATTEMPTS`], or a filter failed permanently.
+    Failed,
+    /// Cancelled by the loop: replaced or no longer wanted, not a failure.
+    Cancelled,
 }
 
 /// The result of one [`backfill_once`] pass, telling [`backfill`] what to do next.
 enum BackfillOutcome {
-    /// Every filter reconciled (or failed permanently and was skipped). Stop.
+    /// Every filter reconciled. Stop.
     Done,
+    /// Every filter ran, but at least one failed permanently and was skipped. Stop:
+    /// a retry can't fix it.
+    Incomplete,
     /// A transient failure interrupted the pass; retry the whole thing after a
     /// backoff.
     Retry,
@@ -640,8 +767,8 @@ enum BackfillOutcome {
 /// connect, a dropped/stalled connection, a `closed: …` NEG-ERR), so
 /// [`backfill`] backs off and tries the whole pass again. A *permanent* per-filter
 /// failure is logged and skipped rather than aborting the pass — a retry can't fix
-/// it, and it must not stop the other filters — so the pass still ends
-/// [`Done`](BackfillOutcome::Done). On `cancel` mid-reconcile it emits a
+/// it, and it must not stop the other filters — so the pass runs on and ends
+/// [`Incomplete`](BackfillOutcome::Incomplete). On `cancel` mid-reconcile it emits a
 /// `NEG-CLOSE` and returns [`Cancelled`](BackfillOutcome::Cancelled).
 ///
 /// `filter_jsons` are the history filters already reduced to their wire JSON by
@@ -653,6 +780,7 @@ async fn backfill_once(
     url: &str,
     filter_jsons: &[String],
     cancel: &mut oneshot::Receiver<()>,
+    progress: &BackfillProgress,
 ) -> BackfillOutcome {
     let mut relay = tokio::select! {
         biased;
@@ -668,6 +796,7 @@ async fn backfill_once(
         },
     };
 
+    let mut skipped = false;
     for filter_json in filter_jsons {
         // Race the reconcile against cancellation. The cancel arm returns only a
         // flag (it must not touch `relay`, which the reconcile arm borrows); the
@@ -675,7 +804,9 @@ async fn backfill_once(
         let cancelled = tokio::select! {
             biased;
             _ = &mut *cancel => true,
-            result = pull_reconcile_windowed(&mut relay, ndb, filter_json, BACKFILL_UNTIL) => {
+            result = pull_reconcile_windowed_with_progress(
+                &mut relay, ndb, filter_json, BACKFILL_UNTIL, progress,
+            ) => {
                 if let Err(e) = result {
                     // Classify synchronously (the error `Box` is `!Send`) before the
                     // next await: a transient error retries the whole pass, a
@@ -685,6 +816,7 @@ async fn backfill_once(
                         return BackfillOutcome::Retry;
                     }
                     tracing::warn!("session backfill: {url}: {e}");
+                    skipped = true;
                 }
                 false
             }
@@ -693,6 +825,9 @@ async fn backfill_once(
             let _ = relay.close_negentropy().await;
             return BackfillOutcome::Cancelled;
         }
+    }
+    if skipped {
+        return BackfillOutcome::Incomplete;
     }
     BackfillOutcome::Done
 }
@@ -880,6 +1015,52 @@ mod tests {
         relay.shutdown();
     }
 
+    /// The backfill status follows a successful backfill and is final by the
+    /// time `wait_for_sync` resolves: every missing event counted as needed and
+    /// fetched, the window range fully covered, the task done, nothing failed.
+    /// A receiver taken before the subscription sees `changed()` fire.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn backfill_status_counts_a_complete_backfill() {
+        const SEEDED: usize = 7;
+        let (_relay_dir, relay_ndb) = temp_ndb();
+        let relay = spawn_relay(relay_ndb.clone());
+        let url = relay.url();
+        let ids = seed_events(&relay_ndb, KIND, SEEDED);
+        let last = *ids.last().expect("seeded ids");
+        assert!(await_note(&relay_ndb, last, KIND as u64, Duration::from_secs(5)).await);
+
+        let (_b_dir, ndb_b) = temp_ndb();
+        let session_b = Session::new(ndb_b.clone());
+        let mut status = session_b.backfill_status();
+        assert_eq!(*status.borrow(), BackfillStatus::default());
+
+        let live_none = Filter::new().kinds([UNRELATED_KIND as u64]).build();
+        let history = Filter::new().kinds([KIND as u64]).build();
+        session_b.set_subscription("hist", url.clone(), vec![live_none], vec![history]);
+
+        tokio::time::timeout(Duration::from_secs(10), status.changed())
+            .await
+            .expect("the status should update once the backfill starts")
+            .expect("the session is alive");
+        tokio::time::timeout(Duration::from_secs(10), session_b.wait_for_sync())
+            .await
+            .expect("backfill should settle within the bound");
+
+        let s = status.borrow().clone();
+        assert_eq!(s.started, 1, "{s:?}");
+        assert_eq!(s.done, s.started, "{s:?}");
+        assert_eq!(s.fetched, SEEDED as u64, "{s:?}");
+        assert_eq!(s.need, SEEDED as u64, "{s:?}");
+        assert!(s.windows >= 1, "{s:?}");
+        assert!(s.span_secs > 0, "{s:?}");
+        assert_eq!(
+            s.covered_secs, s.span_secs,
+            "the range is fully covered: {s:?}"
+        );
+        assert!(!s.failed, "{s:?}");
+        relay.shutdown();
+    }
+
     /// With no history filter there is nothing to backfill, so the barrier
     /// snapshots a target of zero and `wait_for_sync` returns immediately rather
     /// than blocking on a sync. Covers both a live-only subscription and a
@@ -937,6 +1118,26 @@ mod tests {
             0,
             "a failed backfill syncs nothing"
         );
+
+        // The settle doesn't say the backfill gave up; the status does.
+        let s = session.backfill_status().borrow().clone();
+        assert!(s.failed, "a backfill that gave up must flag failed: {s:?}");
+        assert_eq!(s.done, s.started, "{s:?}");
+        assert_eq!(s.fetched, 0, "{s:?}");
+    }
+
+    fn assert_send<T: Send>(_: T) {}
+
+    /// Compile-time check: a backfill reporting into the shared status stays
+    /// `Send`, so the loop can still `tokio::spawn` it on the multi-thread
+    /// runtime. Never called — it only has to type-check.
+    #[allow(dead_code)]
+    fn backfill_with_status_is_send(
+        ndb: Ndb,
+        cancel: oneshot::Receiver<()>,
+        progress: &BackfillProgress,
+    ) {
+        assert_send(backfill(ndb, String::new(), Vec::new(), cancel, progress));
     }
 
     /// A [`Session`]'s live `REQ` delivers an event published *after* it
