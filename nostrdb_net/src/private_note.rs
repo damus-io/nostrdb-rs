@@ -68,7 +68,8 @@ pub struct SlotNote<'a> {
     pub note: Note<'a>,
 }
 
-/// Why a [`write`] or an [`ingest`] stored nothing.
+/// Why a [`write`] or an [`ingest`] stored nothing — or a sealed
+/// [`crate::sns::write_note`] or [`crate::sns::ingest_rumor`].
 #[derive(Debug, thiserror::Error)]
 pub enum WriteError {
     /// Signing the inner note failed.
@@ -77,8 +78,10 @@ pub enum WriteError {
     /// Serializing a note to JSON failed.
     #[error("note serialization failed: {0}")]
     Serialize(String),
-    /// PNS encryption or 1080-envelope signing failed (see [`crate::pns::wrap`]).
-    #[error("PNS wrap failed")]
+    /// Encryption or envelope signing failed: the kind-1080 PNS wrap (see
+    /// [`crate::pns::wrap`]) or the kind-1081 SNS seal (see
+    /// [`crate::sns::wrap_rumor`]).
+    #[error("envelope wrap failed")]
     Wrap,
     /// nostrdb rejected the envelope ingest frame.
     #[error("ndb ingest failed: {0}")]
@@ -171,6 +174,16 @@ pub fn next_stamp(now: u64, stored: u64, after: u64) -> u64 {
     now.max(stored.max(after) + 1)
 }
 
+/// The `created_at` the next write to `slot` stamps, made now: past its
+/// stored revision and `after` (see [`next_stamp`]).
+pub(crate) fn stamp(ndb: &Ndb, slot: Slot<'_>, after: u64) -> u64 {
+    let stored = Transaction::new(ndb)
+        .ok()
+        .and_then(|txn| latest(ndb, &txn, slot))
+        .map_or(0, |revision| revision.created_at);
+    next_stamp(unix_time_secs(), stored, after)
+}
+
 /// Write `content` as `slot`'s newest revision, signed with the author's
 /// `secret`, PNS-wrapped and ingested (see [`write_note`]).
 pub fn write(
@@ -203,11 +216,7 @@ pub fn write_note<'a>(
     note: NoteBuilder<'a>,
     after: u64,
 ) -> Result<u64, WriteError> {
-    let stored = Transaction::new(ndb)
-        .ok()
-        .and_then(|txn| latest(ndb, &txn, slot))
-        .map_or(0, |revision| revision.created_at);
-    let created_at = next_stamp(unix_time_secs(), stored, after);
+    let created_at = stamp(ndb, slot, after);
     let note = note
         .options(NoteBuildOptions::default())
         .created_at(created_at)

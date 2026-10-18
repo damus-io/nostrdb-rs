@@ -8,7 +8,10 @@
 //! the **rumor** — the actual board action, carrying the member's real pubkey.
 //! The seal is what proves authorship even though every member can decrypt.
 //!
-//! This module is the *publish + derivation* half only. nostrdb owns the ingest
+//! This module is the *publish + derivation* half only. A member's write is one
+//! call: [`write_note`] for a latest-wins note (the sealed twin of
+//! [`crate::private_note::write_note`]), [`ingest_rumor`] for a note already
+//! signed. nostrdb owns the ingest
 //! auto-unwrap (register a `team_root`, match kind-1081 by the team pubkey,
 //! symmetric-decrypt the envelope, then reuse the existing seal peel), so the
 //! running app never unwraps an envelope itself — it queries the rumors nostrdb
@@ -27,10 +30,11 @@ use nostr::key::PublicKey;
 use nostr::nips::nip19::FromBech32;
 use nostr::nips::nip44;
 use nostr::nips::nip44::v2::{self, ConversationKey};
-use nostrdb::{Note, NoteBuilder};
+use nostrdb::{IngestMetadata, Ndb, Note, NoteBuildOptions, NoteBuilder};
 use sha2::Sha256;
 
-use crate::{FullKeypair, Pubkey};
+use crate::private_note::{self, Slot, WriteError};
+use crate::{ClientMessage, FullKeypair, Pubkey};
 
 /// Kind number for the SNS envelope (outer wrapper). Provisional, per the spec.
 pub const SNS_ENVELOPE_KIND: u32 = 1081;
@@ -141,6 +145,85 @@ pub fn wrap_rumor(
         .created_at(created_at)
         .sign(&keys.team_keypair.secret_key.secret_bytes())
         .build()
+}
+
+/// A note [`write_note`] sealed and ingested.
+#[derive(Clone, Debug)]
+pub struct Sealed {
+    /// The `created_at` the rumor was stamped with. A caller writing the same
+    /// slot again before this one has landed passes it as the next `after`.
+    pub created_at: u64,
+    /// The envelope as an `["EVENT", {…}]` frame, already ingested locally,
+    /// for a caller with a relay to publish.
+    pub frame: String,
+}
+
+/// Write `note` as `slot`'s newest revision, sealed into the channel of
+/// `keys`: stamped past the stored revision and `after` (as
+/// [`private_note::write_note`] stamps), signed by `member`, then sealed and
+/// ingested ([`ingest_rumor`]).
+///
+/// `note` carries everything but the stamp and the signature, `slot`'s kind
+/// and `d` tag among them. `slot.author` is `member`'s pubkey: the rumor's
+/// author, whose stored revisions the stamp reads. Pass 0 for `after` when
+/// there was no earlier write.
+pub fn write_note(
+    ndb: &Ndb,
+    keys: &SnsKeys,
+    member: &FullKeypair,
+    slot: Slot<'_>,
+    note: NoteBuilder<'_>,
+    after: u64,
+) -> Result<Sealed, WriteError> {
+    let created_at = private_note::stamp(ndb, slot, after);
+    let secret = member.secret_key.secret_bytes();
+    let rumor = note
+        .options(NoteBuildOptions::default())
+        .created_at(created_at)
+        .sign(&secret)
+        .build()
+        .ok_or(WriteError::Build)?;
+    let frame = ingest_rumor(ndb, keys, member, &rumor)?;
+    Ok(Sealed { created_at, frame })
+}
+
+/// Seal an already-signed `rumor` into a kind-1081 envelope stamped with the
+/// rumor's own `created_at`, and ingest it into the local nostrdb as a
+/// client's own write. Returns the envelope's `["EVENT", {…}]` frame for the
+/// caller to publish.
+///
+/// nostrdb unwraps the envelope back to the rumor once the channel's root is
+/// registered (`Ndb::add_team_root`), recomputing the rumor's id, so a note's
+/// id is the same sealed or not. The rumor must be a complete signed note:
+/// the seal peel re-parses it and needs every field, the id among them.
+pub fn ingest_rumor(
+    ndb: &Ndb,
+    keys: &SnsKeys,
+    member: &FullKeypair,
+    rumor: &Note<'_>,
+) -> Result<String, WriteError> {
+    let rumor_json = rumor
+        .json()
+        .map_err(|err| WriteError::Serialize(err.to_string()))?;
+    ingest_rumor_json(ndb, keys, member, &rumor_json, rumor.created_at())
+}
+
+/// [`ingest_rumor`] for a rumor held as its event JSON, such as a stored
+/// note being re-sealed, with the `created_at` the envelope carries.
+pub fn ingest_rumor_json(
+    ndb: &Ndb,
+    keys: &SnsKeys,
+    member: &FullKeypair,
+    rumor_json: &str,
+    created_at: u64,
+) -> Result<String, WriteError> {
+    let envelope = wrap_rumor(keys, member, rumor_json, created_at).ok_or(WriteError::Wrap)?;
+    let frame = ClientMessage::event(&envelope)
+        .and_then(|message| message.to_json())
+        .map_err(|err| WriteError::Serialize(err.to_string()))?;
+    ndb.process_event_with(&frame, IngestMetadata::new().client(true))
+        .map_err(|err| WriteError::Ingest(err.to_string()))?;
+    Ok(frame)
 }
 
 /// Gift-wrap a kind-1082 key-share (the *outbound* half of membership) ready to
@@ -801,5 +884,147 @@ mod tests {
             N,
             "one process_giftwraps call must peel ALL stored gift wraps, not just one"
         );
+    }
+
+    /// A fresh ndb for the [`write_note`] tests, a member and its channel.
+    struct SealedFixture {
+        ndb: Ndb,
+        keys: SnsKeys,
+        member: FullKeypair,
+        _dir: tempfile::TempDir,
+    }
+
+    /// A parameterized-replaceable kind for the [`write_note`] tests.
+    const SEALED_KIND: u32 = 30078;
+
+    impl SealedFixture {
+        /// The fixture, with the channel's root registered only when
+        /// `registered`.
+        fn new(registered: bool) -> Self {
+            let dir = tempfile::TempDir::new().expect("tempdir");
+            let ndb = Ndb::new(dir.path().to_str().unwrap(), &nostrdb::Config::new()).expect("ndb");
+            if registered {
+                assert!(ndb.add_team_root(&test_root()));
+            }
+            Self {
+                ndb,
+                keys: derive_sns_keys(&test_root()).expect("keys"),
+                member: FullKeypair::generate(),
+                _dir: dir,
+            }
+        }
+
+        fn slot<'a>(&'a self, d: &'a str) -> Slot<'a> {
+            Slot {
+                author: &self.member.pubkey,
+                kind: SEALED_KIND,
+                d,
+            }
+        }
+
+        /// Seal `content` as the newest revision of `d`.
+        fn write(&self, d: &str, content: &str, after: u64) -> Sealed {
+            let note = NoteBuilder::new()
+                .kind(SEALED_KIND)
+                .content(content)
+                .start_tag()
+                .tag_str("d")
+                .tag_str(d);
+            write_note(
+                &self.ndb,
+                &self.keys,
+                &self.member,
+                self.slot(d),
+                note,
+                after,
+            )
+            .expect("write")
+        }
+
+        fn latest(&self, d: &str) -> Option<private_note::Revision> {
+            let txn = nostrdb::Transaction::new(&self.ndb).expect("txn");
+            private_note::latest(&self.ndb, &txn, self.slot(d))
+        }
+
+        fn filter(&self, kind: u32) -> nostrdb::Filter {
+            nostrdb::Filter::new().kinds([kind as u64]).build()
+        }
+    }
+
+    /// A sealed write reads back as the member's rumor once the root is
+    /// registered, and its frame is the envelope that was ingested.
+    #[tokio::test]
+    async fn write_note_reads_back_through_a_registered_root() {
+        let fx = SealedFixture::new(true);
+        let sub = fx.ndb.subscribe(&[fx.filter(SEALED_KIND)]).expect("sub");
+
+        let sealed = fx.write("x", "hello", 0);
+        fx.ndb
+            .wait_for_all_notes_within(sub, 1, std::time::Duration::from_secs(10))
+            .await
+            .expect("rumor ingested");
+
+        let newest = fx.latest("x").expect("a revision");
+        assert_eq!(newest.content, "hello");
+        assert_eq!(newest.created_at, sealed.created_at);
+
+        let txn = nostrdb::Transaction::new(&fx.ndb).expect("txn");
+        let rumor = fx.ndb.get_note_by_id(&txn, &newest.id).expect("rumor");
+        assert!(rumor.is_rumor(), "stored as a sealed rumor");
+        assert_eq!(rumor.pubkey(), fx.member.pubkey.bytes());
+        assert_eq!(
+            rumor.rumor_receiver_pubkey(),
+            Some(fx.keys.team_keypair.pubkey.bytes())
+        );
+        assert!(sealed.frame.starts_with("[\"EVENT\""));
+        assert!(sealed.frame.contains(&fx.keys.team_keypair.pubkey.hex()));
+    }
+
+    /// Back to back, each written before the last is stored: the stamp the
+    /// last returned keeps them apart, and the last write wins.
+    #[tokio::test]
+    async fn write_note_stamps_past_an_uningested_write() {
+        let fx = SealedFixture::new(true);
+        let sub = fx.ndb.subscribe(&[fx.filter(SEALED_KIND)]).expect("sub");
+
+        let mut last = 0;
+        for content in ["a", "b", "c"] {
+            let sealed = fx.write("x", content, last);
+            assert!(sealed.created_at > last);
+            last = sealed.created_at;
+        }
+        fx.ndb
+            .wait_for_all_notes_within(sub, 3, std::time::Duration::from_secs(10))
+            .await
+            .expect("rumors ingested");
+
+        let newest = fx.latest("x").expect("a revision");
+        assert_eq!(newest.content, "c");
+        assert_eq!(newest.created_at, last);
+    }
+
+    /// Without the root registered, the envelope is stored but its rumor is
+    /// unreadable: the write never leaks into the clear.
+    #[tokio::test]
+    async fn write_note_is_unreadable_without_the_root() {
+        let fx = SealedFixture::new(false);
+        let sub = fx
+            .ndb
+            .subscribe(&[fx.filter(SNS_ENVELOPE_KIND)])
+            .expect("sub");
+
+        fx.write("x", "secret", 0);
+        fx.ndb
+            .wait_for_all_notes_within(sub, 1, std::time::Duration::from_secs(10))
+            .await
+            .expect("envelope ingested");
+
+        assert_eq!(fx.latest("x"), None);
+        let txn = nostrdb::Transaction::new(&fx.ndb).expect("txn");
+        let rumors = fx
+            .ndb
+            .query(&txn, &[fx.filter(SEALED_KIND)], 10)
+            .expect("query");
+        assert!(rumors.is_empty(), "no rumor without the root");
     }
 }
