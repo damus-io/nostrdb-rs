@@ -13,10 +13,10 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use crate::NoteId;
+use crate::{NoteId, ndb_filter_from_wire};
 use futures_util::{SinkExt, StreamExt};
 use negentropy::{Negentropy, NegentropyStorageVector};
-use nostrdb::{Filter, IngestMetadata, Ndb, Subscription, SubscriptionStream, Transaction};
+use nostrdb::{IngestMetadata, Ndb, Subscription, SubscriptionStream, Transaction};
 use serde_json::Value;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
@@ -273,8 +273,13 @@ impl Relay {
         // immediately: a `nostrdb::Filter` is `!Send`, and holding one across the
         // await loop below would make this future `!Send`, blocking callers that
         // drive sync on a multi-thread runtime (e.g. a `tokio::spawn`ed engine).
+        //
+        // The filter goes through `ndb_filter_from_wire`, so an event the relay
+        // serves on the filter's inclusive `until` still wakes the stream; parsed
+        // raw, nostrdb's exclusive `until` would leave it pending until
+        // `INGEST_TIMEOUT`.
         let sub = {
-            let filter = Filter::from_json(filter_json)?;
+            let filter = ndb_filter_from_wire(filter_json)?;
             ndb.subscribe(std::slice::from_ref(&filter))?
         };
 

@@ -32,6 +32,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::ndb_filter_from_wire;
 use futures_util::{SinkExt, StreamExt};
 use negentropy::{Id, Negentropy, NegentropyStorageVector};
 use nostrdb::{Filter, Ndb, Note, SubscriptionStream, Transaction};
@@ -388,7 +389,9 @@ fn handle_req(
 
     let filters: Vec<Filter> = frame[2..]
         .iter()
-        .filter_map(|f| Filter::from_json(&f.to_string()).ok())
+        // `ndb_filter_from_wire`, not `Filter::from_json`: answer `until`
+        // inclusively, as NIP-01 and strfry do, not with nostrdb's exclusive bound.
+        .filter_map(|f| ndb_filter_from_wire(&f.to_string()).ok())
         .collect();
 
     // Stored phase, run synchronously here: everything already in ndb that
@@ -490,7 +493,8 @@ fn handle_neg_open(
         let _ = out_tx.send(neg_err(sub_id, "NEG-OPEN missing filter"));
         return;
     };
-    let Ok(filter) = Filter::from_json(&filter_json) else {
+    // Inclusive `until`, like the REQ path (see `ndb_filter_from_wire`).
+    let Ok(filter) = ndb_filter_from_wire(&filter_json) else {
         let _ = out_tx.send(neg_err(sub_id, "NEG-OPEN filter is invalid"));
         return;
     };

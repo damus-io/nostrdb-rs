@@ -13,7 +13,7 @@ pub mod sns;
 
 pub use client::{ClientMessage, EventClientMessage};
 pub use error::Error;
-pub use filter::Filter;
+pub use filter::{Filter, ndb_filter_from_wire};
 pub use keypair::{FilledKeypair, FullKeypair, Keypair, KeypairUnowned, SerializableKeypair};
 pub use nostr::SecretKey;
 pub use note::{Note, NoteId};

@@ -15,10 +15,11 @@
 mod progress;
 mod relay;
 mod session;
+mod window;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::Pubkey;
+use crate::{Pubkey, ndb_filter_from_wire};
 use negentropy::{Id, NegentropyStorageVector};
 use nostrdb::{Config, Filter, Ndb, Note, Transaction};
 use serde_json::json;
@@ -26,8 +27,8 @@ use serde_json::json;
 pub use progress::{Progress, SyncEvent};
 pub use relay::{Diff, Relay, TooManyResults, Transient};
 
-use progress::Coverage;
 pub use session::{BackfillStatus, Session};
+use window::{CreatedAtWindow, WindowStack};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -234,25 +235,22 @@ async fn reconcile_sync_windowed<P: Progress + ?Sized>(
     progress: &P,
 ) -> Result<()> {
     let base = json!({ "kinds": kinds, "authors": [author.hex()] });
-    let mut coverage = Coverage::until_now(0, RECONCILE_UNTIL);
 
-    // A LIFO stack of `created_at` windows still to reconcile, and the union of
-    // the ids the relay is missing across every in-cap window (pushed once at the
-    // end, deduped over the whole set — see the note above).
-    let mut windows = vec![(0u64, RECONCILE_UNTIL)];
+    // The `created_at` windows still to reconcile, and the union of the ids the
+    // relay is missing across every in-cap window (pushed once at the end, deduped
+    // over the whole set — see the note above).
+    let mut windows = WindowStack::new(CreatedAtWindow {
+        since: 0,
+        until: RECONCILE_UNTIL,
+    });
     let mut have: HashSet<[u8; 32]> = HashSet::new();
-    while let Some((since, until)) = windows.pop() {
+    while let Some(window) = windows.pop() {
         // Reduce this window to wire JSON + a sealed local set *synchronously*, so
-        // the transient `Filter` never crosses the reconcile await below.
-        let window_json = {
-            let mut obj = base.clone();
-            // Object-key assignment overrides any inherited since/until — no
-            // duplicate fields, unlike copying them onto a FilterBuilder.
-            obj["since"] = json!(since);
-            obj["until"] = json!(until);
-            obj.to_string()
-        };
-        let local = local_set(ndb, &Filter::from_json(&window_json)?)?;
+        // the transient `Filter` never crosses the reconcile await below. The local
+        // set goes through `ndb_filter_from_wire` so it holds the same events the
+        // relay's inclusive `until` does.
+        let window_json = window.wire_json(&base);
+        let local = local_set(ndb, &ndb_filter_from_wire(&window_json)?)?;
 
         let diff = match relay
             .reconcile_with_progress(&window_json, local, progress)
@@ -260,26 +258,23 @@ async fn reconcile_sync_windowed<P: Progress + ?Sized>(
         {
             Ok(diff) => diff,
             // Recoverable cap refusal: bisect this window and retry each half,
-            // recursing until each is under the cap. A one-second (or empty)
-            // window can't bisect further — >cap events sharing a single second is
-            // pathological for these envelope kinds — so pull it with a plain
-            // bounded `REQ` and skip its push: without a reconcile we can't learn
-            // the set difference, and a REQ can't tell us either.
+            // recursing until each is under the cap. A one-second window can't
+            // bisect further — >cap events sharing a single second is pathological
+            // for these envelope kinds — so pull it with a plain bounded `REQ` and
+            // skip its push: without a reconcile we can't learn the set
+            // difference, and a REQ can't tell us either.
             Err(e) if e.downcast_ref::<TooManyResults>().is_some() => {
-                if until <= since + 1 {
+                if !windows.bisect(window, progress) {
                     tracing::warn!(
-                        "windowed reconcile: window [{since},{until}] over cap at min width; REQ fallback"
+                        "windowed reconcile: window [{},{}] over cap at min width; REQ fallback",
+                        window.since,
+                        window.until
                     );
                     let fetched = relay.sync_into(ndb, &window_json).await?;
                     progress.event(SyncEvent::Fetched {
                         count: fetched.len(),
                     });
-                    coverage.finish(since, until, progress);
-                } else {
-                    progress.event(SyncEvent::Split);
-                    let mid = since + (until - since) / 2;
-                    windows.push((since, mid));
-                    windows.push((mid + 1, until));
+                    windows.finish(window, progress);
                 }
                 continue;
             }
@@ -294,7 +289,7 @@ async fn reconcile_sync_windowed<P: Progress + ?Sized>(
         });
         fetch_ids(relay, ndb, &diff.need, progress).await?;
         have.extend(diff.have);
-        coverage.finish(since, until, progress);
+        windows.finish(window, progress);
     }
 
     // Push the events the relay is missing, deduped to their winning revision
@@ -431,21 +426,17 @@ pub async fn pull_reconcile_windowed_with_progress<P: Progress + ?Sized>(
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(until_now);
 
-    // A LIFO stack of `created_at` windows still to reconcile.
-    let mut windows = vec![(base_since, base_until)];
-    let mut coverage = Coverage::until_now(base_since, base_until);
-    while let Some((since, until)) = windows.pop() {
+    let mut windows = WindowStack::new(CreatedAtWindow {
+        since: base_since,
+        until: base_until,
+    });
+    while let Some(window) = windows.pop() {
         // Reduce this window to wire JSON + a sealed local set *synchronously*, so
-        // the transient `Filter` never crosses the reconcile await below.
-        let window_json = {
-            let mut obj = base.clone();
-            // Object-key assignment overrides any inherited since/until — no
-            // duplicate fields, unlike copying them onto a FilterBuilder.
-            obj["since"] = serde_json::json!(since);
-            obj["until"] = serde_json::json!(until);
-            obj.to_string()
-        };
-        let local = local_set(ndb, &Filter::from_json(&window_json)?)?;
+        // the transient `Filter` never crosses the reconcile await below. The local
+        // set goes through `ndb_filter_from_wire` so it holds the same events the
+        // relay's inclusive `until` does.
+        let window_json = window.wire_json(&base);
+        let local = local_set(ndb, &ndb_filter_from_wire(&window_json)?)?;
 
         // Collapse the reconcile `Result` (its `Box<dyn Error>` is `!Send`) into a
         // `Send` value in this one statement, before any further await — holding
@@ -464,28 +455,26 @@ pub async fn pull_reconcile_windowed_with_progress<P: Progress + ?Sized>(
             Ok(need) => {
                 progress.event(SyncEvent::Need { count: need.len() });
                 fetch_ids(relay, ndb, &need, progress).await?;
-                coverage.finish(since, until, progress);
+                windows.finish(window, progress);
             }
             Err(()) => {
-                if until <= since + 1 {
-                    // Can't bisect a one-second (or empty) window further; pull it
-                    // with a plain REQ. Bounded by the relay's REQ limit, so lossy
-                    // above it — but >cap events sharing a single second is
-                    // pathological for the envelope kinds this syncs.
-                    tracing::warn!(
-                        "windowed reconcile: window [{since},{until}] over cap at min width; REQ fallback"
-                    );
-                    let fetched = relay.sync_into(ndb, &window_json).await?;
-                    progress.event(SyncEvent::Fetched {
-                        count: fetched.len(),
-                    });
-                    coverage.finish(since, until, progress);
-                } else {
-                    progress.event(SyncEvent::Split);
-                    let mid = since + (until - since) / 2;
-                    windows.push((since, mid));
-                    windows.push((mid + 1, until));
+                if windows.bisect(window, progress) {
+                    continue;
                 }
+                // Can't bisect a one-second window further; pull it with a plain
+                // REQ. Bounded by the relay's REQ limit, so lossy above it — but
+                // >cap events sharing a single second is pathological for the
+                // envelope kinds this syncs.
+                tracing::warn!(
+                    "windowed reconcile: window [{},{}] over cap at min width; REQ fallback",
+                    window.since,
+                    window.until
+                );
+                let fetched = relay.sync_into(ndb, &window_json).await?;
+                progress.event(SyncEvent::Fetched {
+                    count: fetched.len(),
+                });
+                windows.finish(window, progress);
             }
         }
     }
@@ -1322,14 +1311,11 @@ mod tests {
         .expect("pull settles")
         .expect("pull ok");
 
-        // What the pull actually brought in, not RELAY_ONLY: nostrdb's `until`
-        // is exclusive (`created_at < until`) while the bisection assumes NIP-01's
-        // inclusive bound, so an event sitting exactly on a split's `until` is
-        // matched by neither side's window and skipped. That is a defect of the
-        // windowing, not of the progress reporting this test covers, which must
-        // agree with whatever landed.
-        let n = count_kind(&client_ndb, KIND) - SHARED as usize;
-        assert!(n > 0, "the pull fetched something");
+        // Every relay-only event lands, including the ones on a split's `until`
+        // (1000111 and 1000127 here): the windows are inclusive on both ends and
+        // the local set is built with nostrdb's exclusive `until` corrected.
+        let n = RELAY_ONLY as usize;
+        assert_eq!(count_kind(&client_ndb, KIND), SHARED as usize + n);
         assert_eq!(rec.needed(), n, "need counts sum to what was pulled");
         assert_eq!(rec.fetched(), n, "fetches sum to what was pulled");
         assert_eq!(
