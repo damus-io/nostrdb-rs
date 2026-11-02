@@ -5,6 +5,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use tracing::{debug, error, info};
 
+pub mod auth;
 pub mod message;
 pub mod pool;
 pub mod server;
