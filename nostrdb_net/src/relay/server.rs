@@ -19,8 +19,11 @@
 //!   `NEG-MSG`.
 //! - `["NEG-CLOSE", <sub>]` — end a reconciliation.
 //!
-//! There is deliberately no NIP-11 or NIP-42 auth. Access control is "bind to
-//! localhost" — this is a dogfooding port, not a public relay.
+//! By default there is no NIP-11 or NIP-42 auth. Access control is "bind to
+//! localhost" — the plain [`spawn`] is a dogfooding port, not a public relay.
+//! [`spawn_with_policy`] locks it down for the internet instead: NIP-42 AUTH on
+//! connect, a members allowlist, a kinds allowlist and per-client limits. See
+//! [`AccessPolicy`].
 //!
 //! Rumors are never served. See [`is_servable`].
 //!
@@ -28,20 +31,30 @@
 //! [NIP-77]: https://github.com/nostr-protocol/nips/blob/master/77.md
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::ndb_filter_from_wire;
+use crate::relay::auth;
 use futures_util::{SinkExt, StreamExt};
 use negentropy::{Id, Negentropy, NegentropyStorageVector};
+use nostr::JsonUtil;
 use nostrdb::{Filter, Ndb, Note, SubscriptionStream, Transaction};
 use serde_json::{Value, json};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, oneshot, watch};
-use tokio_tungstenite::accept_async_with_config;
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
+use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+use tokio_tungstenite::{accept_async_with_config, accept_hdr_async_with_config};
+
+mod policy;
+
+pub use policy::AccessPolicy;
+use policy::{ConnAuth, ConnSlot, ConnTracker};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -87,6 +100,74 @@ struct ServerConfig {
     /// Bumped by [`RelayHandle::drop_connections`]; each connection task watches
     /// it and hangs up when it changes, while the accept loop keeps running.
     kick: watch::Receiver<u64>,
+    /// The access policy, when the relay is locked down; `None` is the open
+    /// localhost port.
+    policy: Option<Arc<AccessPolicy>>,
+    /// Open connections per client address, counted only under a policy.
+    conns: Arc<ConnTracker>,
+}
+
+impl ServerConfig {
+    fn policy(&self) -> Option<&AccessPolicy> {
+        self.policy.as_deref()
+    }
+
+    fn stored_query_limit(&self) -> i32 {
+        self.policy()
+            .map_or(STORED_QUERY_LIMIT, |p| p.stored_query_limit)
+    }
+
+    fn neg_frame_limit(&self) -> u64 {
+        self.policy().map_or(NEG_FRAME_LIMIT, |p| p.neg_frame_limit)
+    }
+
+    /// Whether a stored note may be handed to a client: never a rumor (see
+    /// [`is_servable`]), and under a policy only an allowed kind.
+    fn servable(&self, note: &Note<'_>) -> bool {
+        is_servable(note) && self.policy().is_none_or(|p| p.kind_allowed(note.kind()))
+    }
+}
+
+/// A connection's outgoing frames. Subscription tasks push here and the
+/// connection drains them to the socket. Under a policy the queue is bounded: a
+/// push past [`AccessPolicy::outbound_queue`] fails and signals `overflow`, and
+/// the connection hangs up rather than buffer without end for a client that
+/// isn't reading.
+#[derive(Clone)]
+struct Outbox {
+    tx: mpsc::UnboundedSender<Message>,
+    depth: Arc<AtomicUsize>,
+    cap: usize,
+    overflow: Arc<Notify>,
+}
+
+impl Outbox {
+    fn new(cap: Option<usize>) -> (Self, mpsc::UnboundedReceiver<Message>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let outbox = Self {
+            tx,
+            depth: Arc::new(AtomicUsize::new(0)),
+            cap: cap.unwrap_or(usize::MAX),
+            overflow: Arc::new(Notify::new()),
+        };
+        (outbox, rx)
+    }
+
+    fn send(&self, msg: Message) -> Result<(), ()> {
+        if self.depth.fetch_add(1, Ordering::SeqCst) >= self.cap {
+            self.depth.fetch_sub(1, Ordering::SeqCst);
+            self.overflow.notify_one();
+            return Err(());
+        }
+        self.tx.send(msg).map_err(|_| {
+            self.depth.fetch_sub(1, Ordering::SeqCst);
+        })
+    }
+
+    /// One frame left the queue for the socket.
+    fn drained(&self) {
+        self.depth.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// A running relay. Dropping the handle (or calling [`shutdown`](Self::shutdown))
@@ -167,6 +248,29 @@ pub fn spawn_with_limits(
     neg_cap: Option<usize>,
     max_message_len: Option<usize>,
 ) -> std::io::Result<RelayHandle> {
+    spawn_inner(ndb, addr, neg_cap, max_message_len, None)
+}
+
+/// Like [`spawn`], but locked down by `policy`: NIP-42 AUTH on connect, members
+/// and kinds allowlists, and per-client limits, for a relay exposed to the
+/// internet. See [`AccessPolicy`] for exactly what it refuses and how.
+pub fn spawn_with_policy(
+    ndb: Ndb,
+    addr: SocketAddr,
+    policy: AccessPolicy,
+) -> std::io::Result<RelayHandle> {
+    let neg_cap = Some(policy.max_sync_events);
+    let max_message_len = Some(policy.max_message_len);
+    spawn_inner(ndb, addr, neg_cap, max_message_len, Some(Arc::new(policy)))
+}
+
+fn spawn_inner(
+    ndb: Ndb,
+    addr: SocketAddr,
+    neg_cap: Option<usize>,
+    max_message_len: Option<usize>,
+    policy: Option<Arc<AccessPolicy>>,
+) -> std::io::Result<RelayHandle> {
     let std_listener = std::net::TcpListener::bind(addr)?;
     let local_addr = std_listener.local_addr()?;
     std_listener.set_nonblocking(true)?;
@@ -178,6 +282,8 @@ pub fn spawn_with_limits(
         max_message_len,
         events_received: Arc::new(AtomicUsize::new(0)),
         kick: kick_rx,
+        policy,
+        conns: Arc::new(ConnTracker::default()),
     };
     let events_received = config.events_received.clone();
     let (shutdown, shutdown_rx) = watch::channel(false);
@@ -201,12 +307,12 @@ async fn accept_loop(
     loop {
         tokio::select! {
             accepted = listener.accept() => {
-                let Ok((stream, _peer)) = accepted else { continue };
+                let Ok((stream, peer)) = accepted else { continue };
                 let ndb = ndb.clone();
                 let config = config.clone();
                 let shutdown_rx = shutdown_rx.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = serve_connection(stream, ndb, config, shutdown_rx).await {
+                    if let Err(err) = serve_connection(stream, peer, ndb, config, shutdown_rx).await {
                         tracing::debug!("nostrdb_relay connection ended: {err}");
                     }
                 });
@@ -222,6 +328,7 @@ async fn accept_loop(
 
 async fn serve_connection(
     stream: TcpStream,
+    peer: SocketAddr,
     ndb: Ndb,
     config: ServerConfig,
     mut shutdown_rx: watch::Receiver<bool>,
@@ -231,25 +338,74 @@ async fn serve_connection(
         ws_config.max_message_size = Some(max);
         ws_config.max_frame_size = Some(max);
     }
-    let ws = accept_async_with_config(stream, Some(ws_config)).await?;
+    let (ws, _slot) = match config.policy() {
+        None => (
+            accept_async_with_config(stream, Some(ws_config)).await?,
+            None,
+        ),
+        Some(policy) => {
+            // The handshake is on the AUTH clock too, so a client that opens a
+            // socket and never upgrades it doesn't hold a slot forever.
+            let mut slot = None;
+            let admit = admission(&config, policy, peer, &mut slot);
+            let handshake = accept_hdr_async_with_config(stream, admit, Some(ws_config));
+            let ws = tokio::time::timeout(policy.auth_timeout, handshake).await??;
+            (ws, slot)
+        }
+    };
     // Only a kick *after* this connection was accepted hangs it up.
     let mut kick_rx = config.kick.clone();
     kick_rx.borrow_and_update();
     let (mut ws_tx, mut ws_rx) = ws.split();
 
-    // Subscription tasks push frames here; the connection drains them to the
-    // socket. Keeping the original `out_tx` alive means `recv()` never returns
-    // `None` while the connection lives.
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Message>();
-    // subscription id -> cancel signal for its live-streaming task.
-    let mut subs: HashMap<String, oneshot::Sender<()>> = HashMap::new();
-    // subscription id -> in-progress negentropy reconciliation.
-    let mut neg_sessions: HashMap<String, NegSession> = HashMap::new();
+    // Keeping the original `out_tx` alive means `recv()` never returns `None`
+    // while the connection lives.
+    let (out_tx, mut out_rx) = Outbox::new(config.policy().map(|p| p.outbound_queue));
+    let mut conn = Conn {
+        subs: HashMap::new(),
+        neg_sessions: HashMap::new(),
+        auth: config.policy().map(|_| ConnAuth::new()),
+    };
+
+    // Under a policy: challenge on connect, and hang up unless a member has
+    // authenticated before the deadline.
+    let auth_deadline = tokio::time::sleep(
+        config
+            .policy()
+            .map_or(std::time::Duration::MAX, |p| p.auth_timeout),
+    );
+    tokio::pin!(auth_deadline);
+    if let Some(auth) = &conn.auth {
+        ws_tx
+            .send(Message::Text(auth::challenge_message(auth.challenge())))
+            .await?;
+    }
 
     loop {
+        let awaiting_member = conn.auth.as_ref().is_some_and(|a| !a.is_member());
         tokio::select! {
+            // Drain replies before reading the next request, so one client's
+            // queue only grows by what a single frame produces.
+            biased;
+            _ = shutdown_rx.changed() => {
+                if *shutdown_rx.borrow() {
+                    break;
+                }
+            }
+            _ = kick_rx.changed() => break,
+            _ = out_tx.overflow.notified() => {
+                tracing::debug!("nostrdb_relay: hanging up {peer}, outbound queue full");
+                break;
+            }
+            _ = &mut auth_deadline, if awaiting_member => {
+                let _ = ws_tx
+                    .send(notice("auth-required: no member authenticated in time"))
+                    .await;
+                break;
+            }
             outgoing = out_rx.recv() => {
                 if let Some(msg) = outgoing {
+                    out_tx.drained();
                     ws_tx.send(msg).await?;
                 }
             }
@@ -257,33 +413,97 @@ async fn serve_connection(
                 let Some(msg) = incoming else { break };
                 match msg? {
                     Message::Text(text) => {
-                        handle_client_frame(
-                            &text,
-                            &ndb,
-                            &config,
-                            &out_tx,
-                            &mut subs,
-                            &mut neg_sessions,
-                        );
+                        if awaiting_member
+                            && let Some(policy) = config.policy()
+                            && text.len() > policy.pre_auth_max_message_len
+                        {
+                            let _ = ws_tx
+                                .send(notice("auth-required: message too large before AUTH"))
+                                .await;
+                            break;
+                        }
+                        handle_client_frame(&text, &ndb, &config, &out_tx, &mut conn);
                     }
                     Message::Ping(payload) => ws_tx.send(Message::Pong(payload)).await?,
                     Message::Close(_) => break,
                     _ => {}
                 }
             }
-            _ = shutdown_rx.changed() => {
-                if *shutdown_rx.borrow() {
-                    break;
-                }
-            }
-            _ = kick_rx.changed() => break,
         }
     }
-
     // Dropping the cancel senders stops every live subscription task, which then
     // unsubscribes from ndb.
-    subs.clear();
+    conn.subs.clear();
     Ok(())
+}
+
+/// The websocket handshake callback under a policy: work out the client's
+/// address (the policy's client-IP header when present, else the socket peer)
+/// and take a connection slot for it, refusing the upgrade with `429` when it,
+/// or the relay, is at its cap.
+// The error type is tungstenite's handshake callback signature, not ours.
+#[allow(clippy::result_large_err)]
+fn admission<'a>(
+    config: &'a ServerConfig,
+    policy: &'a AccessPolicy,
+    peer: SocketAddr,
+    slot: &'a mut Option<ConnSlot>,
+) -> impl FnOnce(&Request, Response) -> Result<Response, ErrorResponse> + Unpin + 'a {
+    move |request: &Request, response: Response| {
+        let ip = client_ip(request, policy).unwrap_or(peer.ip());
+        match config.conns.admit(ip, policy) {
+            Some(admitted) => {
+                *slot = Some(admitted);
+                Ok(response)
+            }
+            None => {
+                tracing::debug!("nostrdb_relay: refusing {ip}, too many connections");
+                let mut refusal = ErrorResponse::new(Some("too many connections".to_owned()));
+                *refusal.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+                Err(refusal)
+            }
+        }
+    }
+}
+
+/// The client address named by the policy's client-IP header, if it is set and
+/// the request carries a parseable one.
+fn client_ip(request: &Request, policy: &AccessPolicy) -> Option<IpAddr> {
+    let header = policy.client_ip_header.as_deref()?;
+    request
+        .headers()
+        .get(header)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// One connection's protocol state.
+struct Conn {
+    /// subscription id -> cancel signal for its live-streaming task.
+    subs: HashMap<String, oneshot::Sender<()>>,
+    /// subscription id -> in-progress negentropy reconciliation.
+    neg_sessions: HashMap<String, NegSession>,
+    /// NIP-42 state, under a policy.
+    auth: Option<ConnAuth>,
+}
+
+impl Conn {
+    /// `Ok` if this connection may read and write: always without a policy, and
+    /// with one once a member has authenticated. Otherwise the refusal reason.
+    fn gate(&self) -> Result<(), String> {
+        self.auth.as_ref().map_or(Ok(()), ConnAuth::gate)
+    }
+
+    /// Whether `policy` leaves room for one more subscription or negentropy
+    /// session, not counting one that `sub_id` would replace.
+    fn has_room(&self, policy: Option<&AccessPolicy>, sub_id: &str) -> bool {
+        let Some(policy) = policy else { return true };
+        let replacing = self.subs.contains_key(sub_id) || self.neg_sessions.contains_key(sub_id);
+        replacing || self.subs.len() + self.neg_sessions.len() < policy.max_subscriptions
+    }
 }
 
 /// Parse and act on one client text frame. Errors are reported to the client as
@@ -292,9 +512,8 @@ fn handle_client_frame(
     text: &str,
     ndb: &Ndb,
     config: &ServerConfig,
-    out_tx: &mpsc::UnboundedSender<Message>,
-    subs: &mut HashMap<String, oneshot::Sender<()>>,
-    neg_sessions: &mut HashMap<String, NegSession>,
+    out_tx: &Outbox,
+    conn: &mut Conn,
 ) {
     let Ok(Value::Array(frame)) = serde_json::from_str::<Value>(text) else {
         let _ = out_tx.send(notice("could not parse message"));
@@ -302,24 +521,61 @@ fn handle_client_frame(
     };
 
     match frame.first().and_then(Value::as_str) {
-        Some("EVENT") => handle_event(text, &frame, ndb, config, out_tx),
-        Some("REQ") => handle_req(&frame, ndb, out_tx, subs),
+        Some("EVENT") => handle_event(text, &frame, ndb, config, out_tx, conn),
+        Some("REQ") => handle_req(&frame, ndb, config, out_tx, conn),
         Some("CLOSE") => {
             if let Some(sub_id) = frame.get(1).and_then(Value::as_str) {
-                subs.remove(sub_id);
+                conn.subs.remove(sub_id);
             }
         }
-        Some("NEG-OPEN") => handle_neg_open(&frame, ndb, config, out_tx, neg_sessions),
-        Some("NEG-MSG") => handle_neg_msg(&frame, out_tx, neg_sessions),
+        Some("NEG-OPEN") => handle_neg_open(&frame, ndb, config, out_tx, conn),
+        Some("NEG-MSG") => handle_neg_msg(&frame, out_tx, conn),
         Some("NEG-CLOSE") => {
             if let Some(sub_id) = frame.get(1).and_then(Value::as_str) {
-                neg_sessions.remove(sub_id);
+                conn.neg_sessions.remove(sub_id);
             }
         }
+        Some("AUTH") if conn.auth.is_some() => handle_auth(&frame, config, out_tx, conn),
+        Some("COUNT") if conn.auth.is_some() => handle_count(&frame, out_tx, conn),
         _ => {
             let _ = out_tx.send(notice("unrecognized message"));
         }
     }
+}
+
+/// `["AUTH", <event>]` under a policy: check the 22242 against this
+/// connection's challenge and the relay's service URL, and say so with `OK`.
+/// A valid AUTH from a non-member succeeds — it proves who the client is — and
+/// everything it then asks for is refused `restricted:`.
+fn handle_auth(frame: &[Value], config: &ServerConfig, out_tx: &Outbox, conn: &mut Conn) {
+    let (Some(policy), Some(auth)) = (config.policy(), conn.auth.as_mut()) else {
+        return;
+    };
+    let Some(event) = frame.get(1).filter(|e| e.is_object()) else {
+        let _ = out_tx.send(notice("invalid: AUTH missing event"));
+        return;
+    };
+    let event_id = event.get("id").and_then(Value::as_str).unwrap_or("");
+    let reply = match auth.authenticate(policy, &event.to_string(), unix_now()) {
+        Ok(()) => ok(event_id, true, ""),
+        Err(reason) => ok(event_id, false, &reason),
+    };
+    let _ = out_tx.send(reply);
+}
+
+/// `["COUNT", <sub>, <filter>…]` under a policy. Not implemented, but refused
+/// for the same reason as a `REQ` first, so an unauthenticated client learns
+/// to AUTH rather than that COUNT is missing.
+fn handle_count(frame: &[Value], out_tx: &Outbox, conn: &Conn) {
+    let Some(sub_id) = frame.get(1).and_then(Value::as_str) else {
+        let _ = out_tx.send(notice("COUNT missing subscription id"));
+        return;
+    };
+    let reason = match conn.gate() {
+        Err(reason) => reason,
+        Ok(()) => "error: COUNT is not supported".to_owned(),
+    };
+    let _ = out_tx.send(closed(sub_id, &reason));
 }
 
 fn handle_event(
@@ -327,7 +583,8 @@ fn handle_event(
     frame: &[Value],
     ndb: &Ndb,
     config: &ServerConfig,
-    out_tx: &mpsc::UnboundedSender<Message>,
+    out_tx: &Outbox,
+    conn: &Conn,
 ) {
     // Count every EVENT frame that crosses the wire, whether or not ndb ends up
     // storing it (a duplicate/replaced push still arrived) — the metric is what
@@ -340,6 +597,16 @@ fn handle_event(
         .and_then(Value::as_str)
         .unwrap_or("");
 
+    if let Some(policy) = config.policy() {
+        match conn.gate() {
+            Ok(()) => handle_member_event(text, frame, event_id, ndb, policy, out_tx),
+            Err(reason) => {
+                let _ = out_tx.send(ok(event_id, false, &reason));
+            }
+        }
+        return;
+    }
+
     // The client frame is already `["EVENT", {…}]`, exactly what
     // `process_client_event` expects, so we hand it the raw text verbatim.
     match ndb.process_client_event(text) {
@@ -350,6 +617,78 @@ fn handle_event(
             let _ = out_tx.send(ok(event_id, false, &format!("error: {err}")));
         }
     }
+}
+
+/// A member's `EVENT` under a policy. Refuse a kind the policy doesn't carry,
+/// verify the id and signature, and recognise a duplicate, all before answering;
+/// then ingest and answer `OK true` only once the event is stored, so `OK` means
+/// what it says rather than "queued".
+fn handle_member_event(
+    text: &str,
+    frame: &[Value],
+    event_id: &str,
+    ndb: &Ndb,
+    policy: &AccessPolicy,
+    out_tx: &Outbox,
+) {
+    let refuse = |reason: &str| {
+        let _ = out_tx.send(ok(event_id, false, reason));
+    };
+    let Some(event) = frame.get(1).filter(|e| e.is_object()) else {
+        return refuse("invalid: EVENT missing event");
+    };
+    match event.get("kind").and_then(Value::as_u64) {
+        Some(kind) if u32::try_from(kind).is_ok_and(|k| policy.kind_allowed(k)) => {}
+        Some(kind) => return refuse(&format!("blocked: kind {kind} is not accepted here")),
+        None => return refuse("invalid: event has no kind"),
+    }
+    let Ok(event) = nostr::Event::from_json(event.to_string()) else {
+        return refuse("invalid: not a valid nostr event");
+    };
+    if event.verify().is_err() {
+        return refuse("invalid: event id or signature does not verify");
+    }
+
+    let id = event.id.to_bytes();
+    let event_id = event.id.to_hex();
+    if is_stored(ndb, &id) {
+        let _ = out_tx.send(ok(&event_id, true, "duplicate: already have this event"));
+        return;
+    }
+
+    // Watch for the event before ingesting it, so its landing can't slip past.
+    let Ok(sub) = ndb.subscribe(&[Filter::new().ids([&id]).build()]) else {
+        return refuse("error: could not watch for the event");
+    };
+    let mut landed = SubscriptionStream::new(ndb.clone(), sub).notes_per_await(1);
+    if let Err(err) = ndb.process_client_event(text) {
+        return refuse(&format!("error: {err}"));
+    }
+
+    let ndb = ndb.clone();
+    let out_tx = out_tx.clone();
+    let store_timeout = policy.store_timeout;
+    tokio::spawn(async move {
+        let reply = match tokio::time::timeout(store_timeout, landed.next()).await {
+            Ok(Some(_)) => ok(&event_id, true, ""),
+            // Another connection stored the same event first, so this ingest
+            // was dropped as a duplicate and the watch never fired.
+            _ if is_stored(&ndb, &id) => ok(&event_id, true, "duplicate: already have this event"),
+            _ => ok(&event_id, false, "error: the event was not stored"),
+        };
+        let _ = out_tx.send(reply);
+    });
+}
+
+/// Whether ndb already holds the event with this id.
+fn is_stored(ndb: &Ndb, id: &[u8; 32]) -> bool {
+    Transaction::new(ndb).is_ok_and(|txn| ndb.get_notekey_by_id(&txn, id).is_ok())
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// Whether a stored note may be handed to a client.
@@ -375,17 +714,27 @@ fn is_servable(note: &Note<'_>) -> bool {
     !note.is_rumor()
 }
 
-fn handle_req(
-    frame: &[Value],
-    ndb: &Ndb,
-    out_tx: &mpsc::UnboundedSender<Message>,
-    subs: &mut HashMap<String, oneshot::Sender<()>>,
-) {
+fn handle_req(frame: &[Value], ndb: &Ndb, config: &ServerConfig, out_tx: &Outbox, conn: &mut Conn) {
     let Some(sub_id) = frame.get(1).and_then(Value::as_str) else {
         let _ = out_tx.send(notice("REQ missing subscription id"));
         return;
     };
     let sub_id = sub_id.to_owned();
+
+    if let Err(reason) = conn.gate() {
+        let _ = out_tx.send(closed(&sub_id, &reason));
+        return;
+    }
+    if let Some(policy) = config.policy()
+        && frame.len() - 2 > policy.max_filters
+    {
+        let _ = out_tx.send(closed(&sub_id, "blocked: too many filters"));
+        return;
+    }
+    if !conn.has_room(config.policy(), &sub_id) {
+        let _ = out_tx.send(closed(&sub_id, "blocked: too many open subscriptions"));
+        return;
+    }
 
     let filters: Vec<Filter> = frame[2..]
         .iter()
@@ -398,10 +747,10 @@ fn handle_req(
     // matches, then EOSE. Doing it before we spawn keeps the non-`Send` `Filter`
     // and `Transaction` off the awaiting task entirely.
     if let Ok(txn) = Transaction::new(ndb)
-        && let Ok(results) = ndb.query(&txn, &filters, STORED_QUERY_LIMIT)
+        && let Ok(results) = ndb.query(&txn, &filters, config.stored_query_limit())
     {
         for result in results {
-            if !is_servable(&result.note) {
+            if !config.servable(&result.note) {
                 continue;
             }
             if let Ok(note_json) = result.note.json()
@@ -424,10 +773,11 @@ fn handle_req(
     // A re-REQ of an existing id replaces the old subscription: inserting drops
     // the previous cancel sender, which stops the old streaming task.
     let (cancel_tx, cancel_rx) = oneshot::channel();
-    subs.insert(sub_id.clone(), cancel_tx);
+    conn.subs.insert(sub_id.clone(), cancel_tx);
 
     tokio::spawn(stream_subscription(
         ndb.clone(),
+        config.clone(),
         sub,
         sub_id,
         out_tx.clone(),
@@ -445,9 +795,10 @@ fn handle_req(
 /// awaits one batch, then drops it — unsubscribing after the first note.)
 async fn stream_subscription(
     ndb: Ndb,
+    config: ServerConfig,
     sub: nostrdb::Subscription,
     sub_id: String,
-    out_tx: mpsc::UnboundedSender<Message>,
+    out_tx: Outbox,
     mut cancel_rx: oneshot::Receiver<()>,
 ) {
     let mut stream = SubscriptionStream::new(ndb.clone(), sub).notes_per_await(LIVE_BATCH);
@@ -459,7 +810,7 @@ async fn stream_subscription(
                 let Ok(txn) = Transaction::new(&ndb) else { break };
                 for key in keys {
                     if let Ok(note) = ndb.get_note_by_key(&txn, key)
-                        && is_servable(&note)
+                        && config.servable(&note)
                         && let Ok(note_json) = note.json()
                         && out_tx.send(event(&sub_id, &note_json)).is_err()
                     {
@@ -481,13 +832,21 @@ fn handle_neg_open(
     frame: &[Value],
     ndb: &Ndb,
     config: &ServerConfig,
-    out_tx: &mpsc::UnboundedSender<Message>,
-    neg_sessions: &mut HashMap<String, NegSession>,
+    out_tx: &Outbox,
+    conn: &mut Conn,
 ) {
     let Some(sub_id) = frame.get(1).and_then(Value::as_str) else {
         let _ = out_tx.send(notice("NEG-OPEN missing subscription id"));
         return;
     };
+    if let Err(reason) = conn.gate() {
+        let _ = out_tx.send(neg_err(sub_id, &reason));
+        return;
+    }
+    if !conn.has_room(config.policy(), sub_id) {
+        let _ = out_tx.send(neg_err(sub_id, "blocked: too many open subscriptions"));
+        return;
+    }
 
     let Some(filter_json) = frame.get(2).map(Value::to_string) else {
         let _ = out_tx.send(neg_err(sub_id, "NEG-OPEN missing filter"));
@@ -504,7 +863,7 @@ fn handle_neg_open(
         return;
     };
 
-    let mut session = match build_neg_session(ndb, filter, config.neg_cap) {
+    let mut session = match build_neg_session(ndb, filter, config) {
         Ok(Some(session)) => session,
         // Over the per-sync cap: refuse the whole reconciliation, as strfry does
         // for a filter matching more than `maxSyncEvents`. The `too many query
@@ -523,7 +882,7 @@ fn handle_neg_open(
     match session.reconcile(&query) {
         Ok(reply) => {
             let _ = out_tx.send(neg_msg(sub_id, &reply));
-            neg_sessions.insert(sub_id.to_owned(), session);
+            conn.neg_sessions.insert(sub_id.to_owned(), session);
         }
         Err(err) => {
             let _ = out_tx.send(neg_err(sub_id, &format!("reconcile failed: {err}")));
@@ -533,15 +892,16 @@ fn handle_neg_open(
 
 /// One reconciliation round: `["NEG-MSG", <sub>, <msg-hex>]`. Looks up the open
 /// session, folds the client's message in, and replies with the next `NEG-MSG`.
-fn handle_neg_msg(
-    frame: &[Value],
-    out_tx: &mpsc::UnboundedSender<Message>,
-    neg_sessions: &mut HashMap<String, NegSession>,
-) {
+fn handle_neg_msg(frame: &[Value], out_tx: &Outbox, conn: &mut Conn) {
     let Some(sub_id) = frame.get(1).and_then(Value::as_str) else {
         let _ = out_tx.send(notice("NEG-MSG missing subscription id"));
         return;
     };
+    if let Err(reason) = conn.gate() {
+        let _ = out_tx.send(neg_err(sub_id, &reason));
+        return;
+    }
+    let neg_sessions = &mut conn.neg_sessions;
     let Some(session) = neg_sessions.get_mut(sub_id) else {
         let _ = out_tx.send(neg_err(sub_id, "no open negentropy session for this id"));
         return;
@@ -565,16 +925,22 @@ fn handle_neg_msg(
 /// Build a sealed negentropy reconciliation set from every event in ndb matching
 /// `filter`, keyed by `(created_at, id)` as the protocol requires.
 ///
-/// Returns `Ok(None)` when the match exceeds `neg_cap` (strfry `maxSyncEvents`):
-/// the caller refuses the whole reconciliation rather than reconciling a truncated
-/// prefix, mirroring a real relay's per-sync cap. `None` cap never refuses.
+/// Returns `Ok(None)` when the match exceeds the config's `neg_cap` (strfry
+/// `maxSyncEvents`): the caller refuses the whole reconciliation rather than
+/// reconciling a truncated prefix, mirroring a real relay's per-sync cap. `None`
+/// cap never refuses.
 fn build_neg_session(
     ndb: &Ndb,
     filter: Filter,
-    neg_cap: Option<usize>,
+    config: &ServerConfig,
 ) -> Result<Option<NegSession>, BoxError> {
+    let neg_cap = config.neg_cap;
+    // One past the cap is enough to know it's over; don't load more than that.
+    let query_limit = neg_cap.map_or(NEG_QUERY_LIMIT, |cap| {
+        i32::try_from(cap.saturating_add(1)).unwrap_or(i32::MAX)
+    });
     let txn = Transaction::new(ndb)?;
-    let results = ndb.query(&txn, &[filter], NEG_QUERY_LIMIT)?;
+    let results = ndb.query(&txn, &[filter], query_limit)?;
 
     if let Some(cap) = neg_cap
         && results.len() > cap
@@ -586,7 +952,7 @@ fn build_neg_session(
     for result in results {
         // Must match what a `REQ` will actually serve. An id advertised here but
         // withheld there is one the client asks for and never receives.
-        if !is_servable(&result.note) {
+        if !config.servable(&result.note) {
             continue;
         }
         storage.insert(
@@ -596,7 +962,7 @@ fn build_neg_session(
     }
     storage.seal()?;
 
-    Ok(Some(Negentropy::owned(storage, NEG_FRAME_LIMIT)?))
+    Ok(Some(Negentropy::owned(storage, config.neg_frame_limit())?))
 }
 
 fn ok(event_id: &str, status: bool, message: &str) -> Message {
@@ -624,6 +990,11 @@ fn neg_err_too_many(sub_id: &str, cap: Option<usize>) -> Message {
         ),
         None => neg_err(sub_id, "blocked: too many query results"),
     }
+}
+
+/// `["CLOSED", <sub>, <reason>]` — a subscription the relay refused or ended.
+fn closed(sub_id: &str, reason: &str) -> Message {
+    Message::Text(json!(["CLOSED", sub_id, reason]).to_string())
 }
 
 fn eose(sub_id: &str) -> Message {
