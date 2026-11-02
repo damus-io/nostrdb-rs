@@ -38,6 +38,18 @@
 //! - The backfill leg reduces each filter to its wire JSON synchronously, then
 //!   hands it to the `Send` [`pull_reconcile_windowed`](super::pull_reconcile_windowed),
 //!   whose future stays `Send` precisely because it takes no `Filter`.
+//!
+//! # NIP-42 AUTH
+//!
+//! A relay that requires AUTH challenges each connection with `["AUTH", <c>]`
+//! and refuses everything until it is answered. The session answers only for a
+//! relay its caller gave an [`AuthSigner`] with [`Session::set_auth_signer`];
+//! there is no default, so a relay learns the account's pubkey only where the
+//! caller chose. For such a relay it signs each connection's challenge (a fresh
+//! one per reconnect), and once the relay's `OK` accepts it, re-sends every
+//! live `REQ` the relay `CLOSED` and every publish it refused `auth-required:`
+//! in the meantime. Backfills open their own connection, which answers its own
+//! challenge with the same signer (see [`Relay::connect_with_auth`]).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -49,6 +61,7 @@ use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::time::interval;
 
 use super::{Progress, Relay, SyncEvent, Transient, pull_reconcile_windowed_with_progress};
+use crate::relay::auth::{self, AuthSigner};
 use crate::{ClientMessage, RelayPool, RelayStatus, WsEvent, WsMessage};
 
 /// How often the loop pings/reconnects relays to keep the pool alive.
@@ -179,6 +192,20 @@ impl Session {
         });
     }
 
+    /// Answer NIP-42 AUTH challenges from relay `url` as `signer`, or, with
+    /// `None`, stop answering them. Applies to the live connection and to the
+    /// backfills started after it.
+    ///
+    /// Set it before the relay's first [`set_subscription`](Self::set_subscription)
+    /// or [`publish`](Self::publish) so the first backfill authenticates too. A
+    /// challenge the live connection was already sent is answered at once.
+    pub fn set_auth_signer(&self, url: impl Into<String>, signer: Option<AuthSigner>) {
+        let _ = self.cmd_tx.send(Cmd::SetAuthSigner {
+            url: url.into(),
+            signer,
+        });
+    }
+
     /// Drop the subscription previously declared under `id`, sending a `CLOSE` to
     /// every relay and forgetting its live filters so a reconnect won't re-send it.
     pub fn drop_subscription(&self, id: impl Into<String>) {
@@ -235,6 +262,10 @@ enum Cmd {
         history: Vec<SendFilter>,
     },
     DropSubscription(String),
+    SetAuthSigner {
+        url: String,
+        signer: Option<AuthSigner>,
+    },
     Publish {
         note_json: String,
         relays: Vec<String>,
@@ -368,6 +399,39 @@ struct LoopState {
     /// given `(id, url)` cancels the prior task there; dropping a subscription
     /// cancels every task under that id across all relays.
     backfills: HashMap<BackfillKey, oneshot::Sender<()>>,
+    /// Who to answer each relay's AUTH challenge as, by canonical url (see
+    /// [`Session::set_auth_signer`]). A relay without an entry is never answered.
+    signers: HashMap<String, AuthSigner>,
+    /// Each relay's live connection's NIP-42 state, by canonical url. Reset when
+    /// the connection opens or drops, since every connection has its own
+    /// challenge.
+    auth: HashMap<String, ConnAuth>,
+    /// Publishes each relay refused `auth-required:`, by canonical url, sent
+    /// again once a connection to it authenticates. Kept across reconnects,
+    /// unlike [`auth`](Self::auth): nothing else would ever re-send them.
+    held: HashMap<String, Vec<HeldPublish>>,
+}
+
+/// One live connection's NIP-42 handshake, and what waits on it.
+#[derive(Default)]
+struct ConnAuth {
+    /// The challenge this connection was sent, if any.
+    challenge: Option<String>,
+    /// The id (hex) of the AUTH sent and not yet `OK`ed.
+    pending: Option<String>,
+    /// The relay accepted this connection's AUTH.
+    authed: bool,
+    /// Live subscriptions the relay `CLOSED` `auth-required:`, to re-`REQ`
+    /// once authed. Per connection: a reconnect re-`REQ`s them all anyway.
+    closed_subs: HashSet<String>,
+}
+
+/// A publish refused `auth-required:`, waiting for the connection's AUTH.
+struct HeldPublish {
+    /// The event id, hex.
+    id: String,
+    /// The bare event JSON.
+    note_json: String,
 }
 
 /// Identifies one in-flight backfill task: a subscription's history reconcile
@@ -407,6 +471,8 @@ async fn session_loop(
         while let Some(ev) = state.pool.try_recv().map(|e| e.into_owned()) {
             match ev.event {
                 WsEvent::Opened => {
+                    // A new connection gets its own challenge.
+                    state.auth.remove(&ev.relay);
                     if let Some(subs) = state.desired.get(&ev.relay) {
                         for (sid, filters) in subs {
                             state
@@ -425,8 +491,22 @@ async fn session_loop(
                     }
                 }
                 WsEvent::Message(WsMessage::Text(text)) => {
+                    if text.starts_with(r#"["AUTH""#) {
+                        on_auth_challenge(&mut state, &ev.relay, &text);
+                        continue;
+                    }
                     if text.starts_with(r#"["OK""#) {
-                        record_publish_ok(&ndb, &mut state.unacked, &ev.relay, &text);
+                        if on_auth_ok(&mut state, &ev.relay, &text) {
+                            continue;
+                        }
+                        let refused = record_publish_ok(&ndb, &mut state.unacked, &ev.relay, &text);
+                        if let Some(refused) = refused {
+                            hold_for_auth(&mut state, &ev.relay, refused);
+                        }
+                        continue;
+                    }
+                    if text.starts_with(r#"["CLOSED""#) {
+                        on_closed(&mut state, &ev.relay, &text);
                         continue;
                     }
                     // Only EVENT frames ingest; EOSE/NOTICE aren't events, so a
@@ -443,6 +523,8 @@ async fn session_loop(
                     // An `OK` can't arrive on a dead connection; forget what was
                     // awaiting one there so the map can't grow without bound.
                     state.unacked.retain(|(url, _), _| url != &ev.relay);
+                    // Nor an AUTH `OK`; the next connection is challenged anew.
+                    state.auth.remove(&ev.relay);
                 }
                 _ => {}
             }
@@ -516,6 +598,20 @@ fn apply_cmd(
             state.backfills.retain(|key, _| key.id != id);
             state.pool.unsubscribe(id);
         }
+        Cmd::SetAuthSigner { url, signer } => {
+            let url = RelayPool::canonicalize_url(url);
+            match signer {
+                Some(signer) => {
+                    state.signers.insert(url.clone(), signer);
+                    answer_challenge(state, &url);
+                }
+                None => {
+                    state.signers.remove(&url);
+                    // Without a signer they can never be sent.
+                    state.held.remove(&url);
+                }
+            }
+        }
         Cmd::Publish { note_json, relays } => {
             let frame = format!(r#"["EVENT",{note_json}]"#);
             let event_id = serde_json::from_str::<serde_json::Value>(&note_json)
@@ -574,12 +670,14 @@ fn spawn_backfill(
     state.backfills.remove(&key);
     state.started += 1;
     state.progress.status.send_modify(|s| s.started += 1);
+    let signer = state.signers.get(&url).cloned();
     let ndb = ndb.clone();
     let progress = state.progress.clone();
     let (cancel_tx, cancel_rx) = oneshot::channel();
     tokio::spawn(async move {
         let _guard = BackfillDoneGuard(progress.clone());
-        if let BackfillEnd::Failed = backfill(ndb, url, history, cancel_rx, &progress).await {
+        let end = backfill(ndb, url, signer, history, cancel_rx, &progress).await;
+        if let BackfillEnd::Failed = end {
             progress.fail();
         }
     });
@@ -614,32 +712,180 @@ fn relay_ingest(relay: &str) -> IngestMetadata {
 /// published: if the relay now holds the event — it accepted it, or rejected it as
 /// a `duplicate:` of one it already had — re-ingest the event tagged with that
 /// relay. nostrdb already has the note, so this only adds the relay to its seen-on
-/// set, which is what stops fan-out paths re-publishing it on every run. Any other
-/// rejection just clears the pending entry.
+/// set, which is what stops fan-out paths re-publishing it on every run.
+///
+/// A rejection `auth-required:` is returned, for the caller to re-send once the
+/// connection authenticates (see [`hold_for_auth`]). Any other rejection just
+/// clears the pending entry.
 fn record_publish_ok(
     ndb: &Ndb,
     unacked: &mut HashMap<(String, String), String>,
     relay: &str,
     text: &str,
-) {
-    let Ok(frame) = serde_json::from_str::<Vec<serde_json::Value>>(text) else {
-        return;
-    };
-    let Some(id) = frame.get(1).and_then(|v| v.as_str()) else {
-        return;
-    };
-    let Some(note_json) = unacked.remove(&(relay.to_owned(), id.to_owned())) else {
-        return;
-    };
+) -> Option<HeldPublish> {
+    let frame = serde_json::from_str::<Vec<serde_json::Value>>(text).ok()?;
+    let id = frame.get(1).and_then(|v| v.as_str())?;
+    let note_json = unacked.remove(&(relay.to_owned(), id.to_owned()))?;
     let accepted = frame.get(2).and_then(|v| v.as_bool()).unwrap_or(false);
     let reason = frame.get(3).and_then(|v| v.as_str()).unwrap_or("");
+    if !accepted && auth::is_auth_required(reason) {
+        return Some(HeldPublish {
+            id: id.to_owned(),
+            note_json,
+        });
+    }
     if !accepted && !reason.starts_with("duplicate:") {
-        return;
+        return None;
     }
     let event = format!(r#"["EVENT","seen",{note_json}]"#);
     if let Err(e) = ndb.process_event_with(&event, relay_ingest(relay)) {
         tracing::debug!("session: couldn't record {relay} as seen-on for {id}: {e}");
     }
+    None
+}
+
+/// A relay's `["AUTH", <challenge>]` on its live connection: remember the
+/// challenge, and answer it if the caller gave this relay a signer.
+fn on_auth_challenge(state: &mut LoopState, relay: &str, text: &str) {
+    let Some(challenge) = serde_json::from_str::<Vec<serde_json::Value>>(text)
+        .ok()
+        .and_then(|frame| frame.get(1)?.as_str().map(str::to_owned))
+    else {
+        return;
+    };
+    // A fresh challenge supersedes any earlier handshake on this connection,
+    // but not what waits on it.
+    let conn = state.auth.entry(relay.to_owned()).or_default();
+    conn.challenge = Some(challenge);
+    conn.pending = None;
+    conn.authed = false;
+    answer_challenge(state, relay);
+}
+
+/// Answer `relay`'s outstanding challenge, if there is one, nothing is in
+/// flight, and the relay has a signer. Never signs for a relay without one.
+fn answer_challenge(state: &mut LoopState, relay: &str) {
+    let Some(signer) = state.signers.get(relay) else {
+        return;
+    };
+    let Some(conn) = state.auth.get_mut(relay) else {
+        return;
+    };
+    if conn.authed || conn.pending.is_some() {
+        return;
+    }
+    let Some(challenge) = &conn.challenge else {
+        return;
+    };
+    let Some(answer) = signer.answer(relay, challenge) else {
+        tracing::warn!("session: couldn't sign AUTH for {relay}");
+        return;
+    };
+    conn.pending = Some(answer.id);
+    state.pool.send_to(&ClientMessage::raw(answer.frame), relay);
+}
+
+/// A relay's `OK`, if it settles this connection's pending AUTH: on accept,
+/// re-send what the relay refused while it waited; on reject, drop it. Returns
+/// whether the `OK` was the AUTH's, so the caller doesn't treat it as a
+/// publish's.
+fn on_auth_ok(state: &mut LoopState, relay: &str, text: &str) -> bool {
+    let Some(conn) = state.auth.get_mut(relay) else {
+        return false;
+    };
+    let Some(pending) = &conn.pending else {
+        return false;
+    };
+    let Ok(frame) = serde_json::from_str::<Vec<serde_json::Value>>(text) else {
+        return false;
+    };
+    if frame.get(1).and_then(|v| v.as_str()) != Some(pending.as_str()) {
+        return false;
+    }
+    conn.pending = None;
+    let closed_subs = std::mem::take(&mut conn.closed_subs);
+    let held = state.held.remove(relay).unwrap_or_default();
+    if !frame.get(2).and_then(|v| v.as_bool()).unwrap_or(false) {
+        let reason = frame.get(3).and_then(|v| v.as_str()).unwrap_or("");
+        tracing::warn!(
+            "session: {relay} rejected AUTH: {reason}; dropping {} held publishes",
+            held.len()
+        );
+        return true;
+    }
+    conn.authed = true;
+    for sid in closed_subs {
+        resend_req(state, relay, &sid);
+    }
+    for publish in held {
+        resend_publish(state, relay, publish);
+    }
+    true
+}
+
+/// A relay's `["CLOSED", <sub>, <reason>]`. A live subscription closed
+/// `auth-required:` on a relay with a signer is re-`REQ`ed once the connection
+/// authenticates (now, if it already has); anything else is only logged, since
+/// re-sending wouldn't change the answer.
+fn on_closed(state: &mut LoopState, relay: &str, text: &str) {
+    let Ok(frame) = serde_json::from_str::<Vec<serde_json::Value>>(text) else {
+        return;
+    };
+    let Some(sid) = frame.get(1).and_then(|v| v.as_str()) else {
+        return;
+    };
+    let reason = frame.get(2).and_then(|v| v.as_str()).unwrap_or("");
+    if !auth::is_auth_required(reason) || !state.signers.contains_key(relay) {
+        tracing::warn!("session: {relay} closed {sid}: {reason}");
+        return;
+    }
+    let conn = state.auth.entry(relay.to_owned()).or_default();
+    if conn.authed {
+        resend_req(state, relay, sid);
+        return;
+    }
+    conn.closed_subs.insert(sid.to_owned());
+}
+
+/// A publish `relay` refused `auth-required:`: re-send it once the connection
+/// authenticates (now, if it already has), or drop it if the caller gave the
+/// relay no signer.
+fn hold_for_auth(state: &mut LoopState, relay: &str, publish: HeldPublish) {
+    if !state.signers.contains_key(relay) {
+        tracing::warn!(
+            "session: {relay} requires AUTH to publish {} and has no signer",
+            publish.id
+        );
+        return;
+    }
+    if state.auth.get(relay).is_some_and(|conn| conn.authed) {
+        resend_publish(state, relay, publish);
+        return;
+    }
+    state
+        .held
+        .entry(relay.to_owned())
+        .or_default()
+        .push(publish);
+}
+
+/// Re-send live subscription `sid`'s `REQ` to `relay`, if it is still wanted.
+fn resend_req(state: &mut LoopState, relay: &str, sid: &str) {
+    let Some(filters) = state.desired.get(relay).and_then(|subs| subs.get(sid)) else {
+        return;
+    };
+    state
+        .pool
+        .send_to(&req_message(sid.to_owned(), filters), relay);
+}
+
+/// Re-send a held publish to `relay`, awaiting its `OK` again.
+fn resend_publish(state: &mut LoopState, relay: &str, publish: HeldPublish) {
+    let frame = format!(r#"["EVENT",{}]"#, publish.note_json);
+    state
+        .unacked
+        .insert((relay.to_owned(), publish.id), publish.note_json);
+    state.pool.send_to(&ClientMessage::raw(frame), relay);
 }
 
 /// Drop guard that records a backfill task's completion on the shared
@@ -698,6 +944,7 @@ fn relay_connected(pool: &RelayPool, url: &str) -> bool {
 async fn backfill(
     ndb: Ndb,
     url: String,
+    signer: Option<AuthSigner>,
     filters: Vec<SendFilter>,
     mut cancel: oneshot::Receiver<()>,
     progress: &BackfillProgress,
@@ -713,7 +960,8 @@ async fn backfill(
         .collect();
 
     for attempt in 1..=BACKFILL_MAX_ATTEMPTS {
-        match backfill_once(&ndb, &url, &filter_jsons, &mut cancel, progress).await {
+        let pass = backfill_once(&ndb, &url, &signer, &filter_jsons, &mut cancel, progress);
+        match pass.await {
             BackfillOutcome::Done => return BackfillEnd::Complete,
             BackfillOutcome::Incomplete => return BackfillEnd::Failed,
             BackfillOutcome::Cancelled => return BackfillEnd::Cancelled,
@@ -778,6 +1026,7 @@ enum BackfillOutcome {
 async fn backfill_once(
     ndb: &Ndb,
     url: &str,
+    signer: &Option<AuthSigner>,
     filter_jsons: &[String],
     cancel: &mut oneshot::Receiver<()>,
     progress: &BackfillProgress,
@@ -785,7 +1034,7 @@ async fn backfill_once(
     let mut relay = tokio::select! {
         biased;
         _ = &mut *cancel => return BackfillOutcome::Cancelled,
-        connected = Relay::connect(url) => match connected {
+        connected = Relay::connect_with_auth(url, signer.clone()) => match connected {
             Ok(relay) => relay,
             Err(e) => {
                 // A failed connect is transient — the relay may just be momentarily
@@ -1137,7 +1386,14 @@ mod tests {
         cancel: oneshot::Receiver<()>,
         progress: &BackfillProgress,
     ) {
-        assert_send(backfill(ndb, String::new(), Vec::new(), cancel, progress));
+        assert_send(backfill(
+            ndb,
+            String::new(),
+            None,
+            Vec::new(),
+            cancel,
+            progress,
+        ));
     }
 
     /// A [`Session`]'s live `REQ` delivers an event published *after* it

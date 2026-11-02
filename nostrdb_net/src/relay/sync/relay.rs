@@ -9,6 +9,15 @@
 //!   each stored one into a local nostrdb, so the caller can fold locally.
 //! - [`Relay::publish`] forwards the `["EVENT", {...}]` frames produced by an
 //!   edit (or surfaced by reconcile) back to the relay, so the app sees them.
+//!
+//! A relay that requires [NIP-42] AUTH is reached with
+//! [`Relay::connect_with_auth`]: the client answers the relay's challenge with
+//! its [`AuthSigner`] and, when a `NEG-OPEN`, `REQ` or `EVENT` was refused
+//! `auth-required:` before the relay saw that answer, waits for the relay's `OK`
+//! and asks once more. Without a signer it never authenticates, and an
+//! `auth-required:` refusal is an [`AuthRequired`] error.
+//!
+//! [NIP-42]: https://github.com/nostr-protocol/nips/blob/master/42.md
 
 use std::collections::HashSet;
 use std::time::Duration;
@@ -24,6 +33,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use super::Result;
 use super::progress::{Progress, SyncEvent};
+use crate::relay::auth::{self, AuthSigner};
 
 /// Upper bound, in bytes, on each negentropy message this client sends.
 ///
@@ -129,15 +139,82 @@ impl std::fmt::Display for Transient {
 
 impl std::error::Error for Transient {}
 
+/// A relay refused a request `auth-required:` and this client could not
+/// authenticate: it has no [`AuthSigner`] for the relay, or the relay rejected
+/// the AUTH it sent. Permanent — retrying without a (different) signer gets the
+/// same answer — so a [`Session`](super::Session) backfill gives up on it rather
+/// than backing off.
+#[derive(Debug)]
+pub struct AuthRequired {
+    /// The relay, as dialed.
+    pub relay: String,
+    /// What went wrong: the relay's `auth-required:` reason, or its `OK` reason
+    /// for a rejected AUTH.
+    pub reason: String,
+}
+
+impl std::fmt::Display for AuthRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} requires NIP-42 AUTH: {}", self.relay, self.reason)
+    }
+}
+
+impl std::error::Error for AuthRequired {}
+
+/// A relay refused a request `restricted:`: this client authenticated, but as a
+/// pubkey the relay won't serve (not a member).
+#[derive(Debug)]
+pub struct Restricted {
+    /// The relay, as dialed.
+    pub relay: String,
+    /// The relay's `restricted:` reason.
+    pub reason: String,
+}
+
+impl std::fmt::Display for Restricted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} refused this account: {}", self.relay, self.reason)
+    }
+}
+
+impl std::error::Error for Restricted {}
+
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 pub struct Relay {
     ws: Ws,
     url: String,
+    /// Who to answer an AUTH challenge as; `None` never answers one.
+    signer: Option<AuthSigner>,
+    auth: AuthState,
+}
+
+/// Where this connection's NIP-42 handshake stands.
+enum AuthState {
+    /// No AUTH sent: no challenge yet, or no signer to answer one with.
+    Idle,
+    /// An AUTH is out; the relay's `OK` will carry this 22242 id (hex).
+    Pending(String),
+    /// The relay accepted the AUTH.
+    Authed,
+    /// The relay rejected the AUTH, for this reason.
+    Refused(String),
 }
 
 impl Relay {
+    /// Connect to `url` without an [`AuthSigner`]: this connection never
+    /// authenticates. See [`connect_with_auth`](Self::connect_with_auth).
     pub async fn connect(url: &str) -> Result<Self> {
+        Self::connect_with_auth(url, None).await
+    }
+
+    /// Connect to `url`, answering any NIP-42 AUTH challenge it sends with
+    /// `signer`. With `None` the connection never authenticates, and a request
+    /// the relay refuses `auth-required:` fails with [`AuthRequired`].
+    ///
+    /// Nothing waits for a challenge here: a relay that wants AUTH sends one
+    /// first, and it is answered as soon as a read sees it.
+    pub async fn connect_with_auth(url: &str, signer: Option<AuthSigner>) -> Result<Self> {
         let (ws, _resp) = tokio::time::timeout(CONNECT_TIMEOUT, connect_async(url))
             .await
             .map_err(|_| format!("connecting to {url} timed out"))?
@@ -145,6 +222,8 @@ impl Relay {
         Ok(Relay {
             ws,
             url: url.to_string(),
+            signer,
+            auth: AuthState::Idle,
         })
     }
 
@@ -163,7 +242,35 @@ impl Relay {
 
     /// [`reconcile`](Self::reconcile), reporting a [`SyncEvent::Round`] to
     /// `progress` as each `NEG-MSG` round trip finishes.
+    ///
+    /// A `NEG-OPEN` refused `auth-required:` is re-opened once this connection
+    /// has authenticated (see [`connect_with_auth`](Self::connect_with_auth)).
     pub async fn reconcile_with_progress<P: Progress + ?Sized>(
+        &mut self,
+        filter_json: &str,
+        storage: NegentropyStorageVector,
+        progress: &P,
+    ) -> Result<Diff> {
+        // Negentropy consumes the set, so keep a copy for the re-open — only
+        // while an auth refusal is still possible, since a large set costs.
+        if !self.may_need_auth() {
+            return self.reconcile_once(filter_json, storage, progress).await;
+        }
+        let retry = storage.clone();
+        // The first result stays inside this block: an error is a `!Send` `Box`,
+        // and must not be alive across the awaits below.
+        let reason = {
+            match self.reconcile_once(filter_json, storage, progress).await {
+                Err(e) if e.is::<AuthRequired>() => e.to_string(),
+                done => return done,
+            }
+        };
+        self.await_auth(&reason).await?;
+        self.reconcile_once(filter_json, retry, progress).await
+    }
+
+    /// One `NEG-OPEN` through to the final `NEG-MSG`.
+    async fn reconcile_once<P: Progress + ?Sized>(
         &mut self,
         filter_json: &str,
         storage: NegentropyStorageVector,
@@ -216,6 +323,7 @@ impl Relay {
                 }
                 Some("NEG-ERR") => {
                     let reason = frame.get(2).and_then(Value::as_str).unwrap_or("");
+                    self.refusal(reason)?;
                     // "too many query results" (strfry) / "RESULTS_TOO_BIG" (the
                     // NIP-77 spec code) is the recoverable cap refusal — surface it
                     // as a typed error so a windowed caller can narrow and retry,
@@ -266,6 +374,9 @@ impl Relay {
     /// *before* the `REQ` and, after `EOSE`, await that [`SubscriptionStream`]
     /// until every received id has landed — driving the ingest off a wakeup
     /// rather than polling for it.
+    ///
+    /// A `REQ` closed `auth-required:` is re-sent once this connection has
+    /// authenticated (see [`connect_with_auth`](Self::connect_with_auth)).
     pub async fn sync_into(&mut self, ndb: &Ndb, filter_json: &str) -> Result<Vec<[u8; 32]>> {
         // Subscribe first so notes ingested during this REQ wake the stream we
         // await below. (A subscription only fires for future ingests, so it must
@@ -283,10 +394,11 @@ impl Relay {
             ndb.subscribe(std::slice::from_ref(&filter))?
         };
 
-        self.send_text(format!(r#"["REQ","{SUB}",{filter_json}]"#))
-            .await?;
+        let req = format!(r#"["REQ","{SUB}",{filter_json}]"#);
+        self.send_text(req.clone()).await?;
 
         let mut received = Vec::new();
+        let mut retried = false;
         loop {
             let text = self.next_text().await?;
             let frame: Vec<Value> = serde_json::from_str(&text)?;
@@ -309,7 +421,17 @@ impl Relay {
                     }
                 }
                 Some("EOSE") => break,
-                Some("CLOSED") => return Err(format!("relay closed subscription: {text}").into()),
+                Some("CLOSED") => {
+                    let reason = frame.get(2).and_then(Value::as_str).unwrap_or("");
+                    if auth::is_auth_required(reason) && !retried && self.signer.is_some() {
+                        self.await_auth(reason).await?;
+                        retried = true;
+                        self.send_text(req.clone()).await?;
+                        continue;
+                    }
+                    self.refusal(reason)?;
+                    return Err(format!("relay closed subscription: {text}").into());
+                }
                 _ => {}
             }
         }
@@ -328,10 +450,45 @@ impl Relay {
     /// already there, so the push has nothing to do. This is the common case when
     /// reconcile flushes a cached event whose newer replacement made the relay
     /// drop the old id we still hold.
+    ///
+    /// Events refused `auth-required:` are re-sent once this connection has
+    /// authenticated (see [`connect_with_auth`](Self::connect_with_auth)).
     pub async fn publish(&mut self, frames: &[String]) -> Result<()> {
+        let held = self.publish_once(frames).await?;
+        if held.ids.is_empty() {
+            return Ok(());
+        }
+        let reason = held.reason;
+        if self.signer.is_none() {
+            self.refusal(&reason)?;
+        }
+        self.await_auth(&reason).await?;
+        let resend: Vec<String> = frames
+            .iter()
+            .filter(|frame| event_frame_id(frame).is_some_and(|id| held.ids.contains(&id)))
+            .cloned()
+            .collect();
+        let still = self.publish_once(&resend).await?;
+        if still.ids.is_empty() {
+            return Ok(());
+        }
+        Err(Box::new(AuthRequired {
+            relay: self.url.clone(),
+            reason: still.reason,
+        }))
+    }
+
+    /// Send `frames` and collect an `OK` for each. Returns the events refused
+    /// `auth-required:`, for [`publish`](Self::publish) to re-send after AUTH;
+    /// any other refusal that isn't [benign](is_benign_reject) is an error.
+    async fn publish_once(&mut self, frames: &[String]) -> Result<HeldForAuth> {
         for frame in frames {
             self.send_text(frame.clone()).await?;
         }
+        let mut held = HeldForAuth {
+            ids: HashSet::new(),
+            reason: String::new(),
+        };
         let mut acked = 0;
         while acked < frames.len() {
             let text = self.next_text().await?;
@@ -340,14 +497,118 @@ impl Relay {
                 let accepted = frame.get(2).and_then(Value::as_bool).unwrap_or(false);
                 if !accepted {
                     let reason = frame.get(3).and_then(Value::as_str).unwrap_or("");
-                    if !is_benign_reject(reason) {
+                    if auth::is_auth_required(reason) {
+                        if let Some(id) = frame.get(1).and_then(Value::as_str) {
+                            held.ids.insert(id.to_owned());
+                        }
+                        held.reason = reason.to_owned();
+                    } else if !is_benign_reject(reason) {
+                        self.refusal(reason)?;
                         return Err(format!("relay rejected event: {reason}").into());
                     }
                 }
                 acked += 1;
             }
         }
+        Ok(held)
+    }
+
+    /// Whether a request on this connection could still be refused
+    /// `auth-required:` and then succeed: there is a signer, and the relay has
+    /// not settled the AUTH yet.
+    fn may_need_auth(&self) -> bool {
+        self.signer.is_some() && !matches!(self.auth, AuthState::Authed | AuthState::Refused(_))
+    }
+
+    /// Wait until the relay has settled this connection's AUTH, after it refused
+    /// a request with `reason` (`auth-required: …`). `Ok` once the relay
+    /// accepted it; an [`AuthRequired`] error without a signer, or if the relay
+    /// rejected it.
+    ///
+    /// The relay's challenge came before the refusal, so by now
+    /// [`next_text`](Self::next_text) has answered it and only the `OK` may be
+    /// outstanding. Frames read meanwhile belong to the refused request, which is
+    /// over, so they are dropped.
+    async fn await_auth(&mut self, reason: &str) -> Result<()> {
+        if self.signer.is_none() {
+            return Err(Box::new(AuthRequired {
+                relay: self.url.clone(),
+                reason: format!("{reason} (no signer for this relay)"),
+            }));
+        }
+        loop {
+            match &self.auth {
+                AuthState::Authed => return Ok(()),
+                AuthState::Refused(why) => {
+                    return Err(Box::new(AuthRequired {
+                        relay: self.url.clone(),
+                        reason: format!("relay rejected AUTH: {why}"),
+                    }));
+                }
+                AuthState::Idle | AuthState::Pending(_) => {
+                    let text = self.next_raw_text().await?;
+                    if !self.handle_auth_frame(&text).await? {
+                        tracing::trace!("{}: dropped while awaiting AUTH: {text}", self.url);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Turn an NIP-42 refusal `reason` into its typed error: [`AuthRequired`]
+    /// for `auth-required:`, [`Restricted`] for `restricted:`. `Ok` for any other
+    /// reason, which the caller reports its own way.
+    fn refusal(&self, reason: &str) -> Result<()> {
+        let relay = self.url.clone();
+        let reason = reason.to_owned();
+        if auth::is_auth_required(&reason) {
+            return Err(Box::new(AuthRequired { relay, reason }));
+        }
+        if auth::is_restricted(&reason) {
+            return Err(Box::new(Restricted { relay, reason }));
+        }
         Ok(())
+    }
+
+    /// Handle the relay's side of the NIP-42 handshake, if `text` is part of it:
+    /// answer an `["AUTH", <challenge>]` (only with a signer), and settle the
+    /// pending AUTH on its `OK`. Returns whether `text` was consumed, so
+    /// [`next_text`](Self::next_text) hides it from the request in progress.
+    async fn handle_auth_frame(&mut self, text: &str) -> Result<bool> {
+        if text.starts_with(r#"["AUTH""#) {
+            let challenge = serde_json::from_str::<Vec<Value>>(text)
+                .ok()
+                .and_then(|frame| frame.get(1)?.as_str().map(str::to_owned));
+            let answer = match (&self.signer, challenge) {
+                (Some(signer), Some(challenge)) => signer.answer(&self.url, &challenge),
+                _ => None,
+            };
+            if let Some(answer) = answer {
+                self.send_text(answer.frame).await?;
+                self.auth = AuthState::Pending(answer.id);
+            }
+            return Ok(true);
+        }
+        let AuthState::Pending(pending) = &self.auth else {
+            return Ok(false);
+        };
+        if !text.starts_with(r#"["OK""#) {
+            return Ok(false);
+        }
+        let Ok(frame) = serde_json::from_str::<Vec<Value>>(text) else {
+            return Ok(false);
+        };
+        if frame.get(1).and_then(Value::as_str) != Some(pending.as_str()) {
+            return Ok(false);
+        }
+        self.auth = if frame.get(2).and_then(Value::as_bool).unwrap_or(false) {
+            AuthState::Authed
+        } else {
+            let why = frame.get(3).and_then(Value::as_str).unwrap_or("");
+            tracing::warn!("{}: AUTH rejected: {why}", self.url);
+            AuthState::Refused(why.to_owned())
+        };
+        Ok(true)
     }
 
     /// Send one text frame. A failed write means the relay dropped the connection
@@ -363,12 +624,23 @@ impl Relay {
             .map_err(|e| Transient(format!("{}: websocket write error: {e}", self.url)).into())
     }
 
-    /// Await the next text frame, skipping pings/binary.
+    /// Await the next text frame, skipping pings/binary and the relay's half of
+    /// the NIP-42 handshake (see [`handle_auth_frame`](Self::handle_auth_frame)).
+    async fn next_text(&mut self) -> Result<String> {
+        loop {
+            let text = self.next_raw_text().await?;
+            if !self.handle_auth_frame(&text).await? {
+                return Ok(text);
+            }
+        }
+    }
+
+    /// Await the next text frame, whatever it is, skipping pings/binary.
     ///
     /// Each read is bounded by [`RECV_TIMEOUT`] so a half-open relay that stops
     /// sending mid-session can't wedge the reconcile/sync/publish loops (a stalled
     /// stream never yields `None`, so the EOF guard below would never fire).
-    async fn next_text(&mut self) -> Result<String> {
+    async fn next_raw_text(&mut self) -> Result<String> {
         loop {
             // A stall, a clean EOF, and a mid-stream websocket error are all
             // transient connection hiccups (the peer went away, not a permanent
@@ -452,6 +724,20 @@ async fn await_ingest(ndb: &Ndb, sub: Subscription, received: &[[u8; 32]]) {
         }
     })
     .await;
+}
+
+/// The events of a [`Relay::publish_once`] the relay refused `auth-required:`.
+struct HeldForAuth {
+    /// Their ids, hex, as the relay's `OK`s carried them.
+    ids: HashSet<String>,
+    /// The last such refusal's reason, for the error if AUTH doesn't fix it.
+    reason: String,
+}
+
+/// The id (hex) of the event in an `["EVENT", {...}]` frame.
+fn event_frame_id(frame: &str) -> Option<String> {
+    let frame: Vec<Value> = serde_json::from_str(frame).ok()?;
+    Some(frame.get(1)?.get("id")?.as_str()?.to_owned())
 }
 
 /// Whether an `OK: false` reason means the relay already has the event (or a

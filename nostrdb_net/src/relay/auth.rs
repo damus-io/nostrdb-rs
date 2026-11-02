@@ -12,6 +12,8 @@
 //! - [`build_auth_event`] — the client half: sign the answer to a challenge.
 //! - [`verify_auth_event`] — the relay half: check an answer against the
 //!   challenge this connection was sent and the URL the relay serves as.
+//! - [`AuthSigner`] — the identity a client sync answers challenges with, for
+//!   the relays its caller chose.
 //!
 //! [NIP-42]: https://github.com/nostr-protocol/nips/blob/master/42.md
 
@@ -19,7 +21,7 @@ use nostr::JsonUtil;
 use nostrdb::{Note, NoteBuilder};
 use serde_json::json;
 
-use crate::{FilledKeypair, Pubkey};
+use crate::{FilledKeypair, FullKeypair, Pubkey};
 
 /// The NIP-42 client-authentication event kind.
 pub const AUTH_KIND: u32 = 22242;
@@ -59,6 +61,81 @@ pub fn build_auth_event(
 pub fn auth_message(note: &Note<'_>) -> Result<String, nostrdb::Error> {
     let note_json = note.json()?;
     Ok(format!(r#"["AUTH",{note_json}]"#))
+}
+
+/// The identity a client may answer one relay's AUTH challenge with.
+///
+/// A client sync ([`Session`](super::sync::Session),
+/// [`Relay`](super::sync::Relay)) authenticates to a relay only when its caller
+/// hands it one of these for that relay; without one it never signs a 22242,
+/// so a relay learns the account's pubkey only where the caller chose to reveal
+/// it. There is no default signer.
+#[derive(Clone)]
+pub struct AuthSigner {
+    keypair: FullKeypair,
+    service_url: Option<String>,
+}
+
+impl AuthSigner {
+    /// Answer challenges as `keypair`, naming whichever URL the client dialed in
+    /// the 22242's `relay` tag.
+    pub fn new(keypair: FullKeypair) -> Self {
+        Self {
+            keypair,
+            service_url: None,
+        }
+    }
+
+    /// Name `service_url` in the `relay` tag instead of the dialed URL: the
+    /// name the relay serves as (`wss://sns.damus.io`), when the socket reaches
+    /// it some other way, e.g. a test dialing `ws://127.0.0.1:<port>`.
+    pub fn with_service_url(mut self, service_url: impl Into<String>) -> Self {
+        self.service_url = Some(service_url.into());
+        self
+    }
+
+    /// The pubkey this signer authenticates as.
+    pub fn pubkey(&self) -> &Pubkey {
+        &self.keypair.pubkey
+    }
+
+    /// The `["AUTH", <event>]` answer to `challenge` from the relay dialed as
+    /// `dialed_url`, and the 22242's id, which the relay's `OK` echoes. `None`
+    /// if the note fails to build, sign or serialize.
+    pub fn answer(&self, dialed_url: &str, challenge: &str) -> Option<AuthAnswer> {
+        let relay_url = self.service_url.as_deref().unwrap_or(dialed_url);
+        let note = build_auth_event(self.keypair.to_filled(), relay_url, challenge)?;
+        let frame = auth_message(&note).ok()?;
+        Some(AuthAnswer {
+            id: hex::encode(note.id()),
+            frame,
+        })
+    }
+}
+
+/// A signed answer to an AUTH challenge, ready to send.
+pub struct AuthAnswer {
+    /// The 22242's id, hex: the relay's `OK` for the AUTH carries it.
+    pub id: String,
+    /// The `["AUTH", <event>]` frame.
+    pub frame: String,
+}
+
+/// Whether a relay's `OK`/`CLOSED`/`NEG-ERR` reason is NIP-42's
+/// `auth-required:`, i.e. "authenticate, then ask again".
+pub fn is_auth_required(reason: &str) -> bool {
+    machine_prefix(reason) == "auth-required"
+}
+
+/// Whether a relay's reason is NIP-42's `restricted:`: authenticated, but as a
+/// pubkey the relay won't serve.
+pub fn is_restricted(reason: &str) -> bool {
+    machine_prefix(reason) == "restricted"
+}
+
+/// The machine-readable prefix of a NIP-01 reason, `<prefix>: <message>`.
+fn machine_prefix(reason: &str) -> &str {
+    reason.split(':').next().unwrap_or("").trim()
 }
 
 /// What a relay expects of the 22242 a connection answers with.

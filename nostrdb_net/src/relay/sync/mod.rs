@@ -25,7 +25,7 @@ use nostrdb::{Config, Filter, Ndb, Note, Transaction};
 use serde_json::json;
 
 pub use progress::{Progress, SyncEvent};
-pub use relay::{Diff, Relay, TooManyResults, Transient};
+pub use relay::{AuthRequired, Diff, Relay, Restricted, TooManyResults, Transient};
 
 pub use session::{BackfillStatus, Session};
 use window::{CreatedAtWindow, WindowStack};
