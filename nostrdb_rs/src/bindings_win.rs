@@ -362,6 +362,7 @@ pub const NDB_FLAG_SKIP_NOTE_VERIFY: u32 = 2;
 pub const NDB_FLAG_NO_FULLTEXT: u32 = 4;
 pub const NDB_FLAG_NO_NOTE_BLOCKS: u32 = 8;
 pub const NDB_FLAG_NO_STATS: u32 = 16;
+pub const NDB_FLAG_NO_PUBKEY_INDEX: u32 = 32;
 pub const NDB_NUM_FILTERS: u32 = 10;
 pub const MAX_TEXT_SEARCH_RESULTS: u32 = 128;
 pub const MAX_TEXT_SEARCH_WORDS: u32 = 8;

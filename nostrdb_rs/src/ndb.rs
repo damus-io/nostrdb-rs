@@ -1359,6 +1359,40 @@ mod tests {
         }
     }
 
+    /// With the author-only index off, a single-author query without kinds is
+    /// answered by another plan and still finds the note.
+    #[tokio::test]
+    async fn author_query_works_without_pubkey_index() {
+        let db = "target/testdbs/no_pubkey_index";
+        test_util::cleanup_db(&db);
+
+        {
+            let config = Config::new()
+                .skip_pubkey_index(true)
+                .skip_fulltext(true)
+                .skip_note_blocks(true)
+                .skip_stats(true);
+            let ndb = Ndb::new(db, &config).expect("ndb");
+
+            let sub = ndb
+                .subscribe(&[Filter::new().kinds(vec![1]).build()])
+                .expect("sub_id");
+            let waiter = ndb.wait_for_notes(sub, 1);
+            ndb.process_event(r#"["EVENT","b",{"id": "702555e52e82cc24ad517ba78c21879f6e47a7c0692b9b20df147916ae8731a3","pubkey": "32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15","created_at": 1702675561,"kind": 1,"tags": [],"content": "hello, world","sig": "2275c5f5417abfd644b7bc74f0388d70feb5d08b6f90fa18655dda5c95d013bfbc5258ea77c05b7e40e0ee51d8a2efa931dc7a0ec1db4c0a94519762c6625675"}]"#).expect("process ok");
+            waiter.await.expect("await ok");
+
+            let author: [u8; 32] =
+                hex::decode("32bf915904bfde2d136ba45dde32c88f4aca863783999faea2e847a8fafd2f15")
+                    .unwrap()
+                    .try_into()
+                    .unwrap();
+            let txn = Transaction::new(&ndb).expect("txn");
+            let filters = [Filter::new().authors([&author]).build()];
+            let res = ndb.query(&txn, &filters, 4).expect("query ok");
+            assert_eq!(res.len(), 1);
+        }
+    }
+
     /// The bounded wait returns the notes when they arrive, exactly like the
     /// unbounded one, so the deadline costs a well-behaved caller nothing.
     #[tokio::test]

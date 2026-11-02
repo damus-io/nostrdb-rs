@@ -105,6 +105,42 @@ impl Config {
         self
     }
 
+    fn set_flag(mut self, flag: u32, on: bool) -> Self {
+        let flag = flag as i32;
+        if on {
+            self.config.flags |= flag;
+        } else {
+            self.config.flags &= !flag;
+        }
+        self
+    }
+
+    /// Don't build the fulltext search index. Only kinds 1 and 30023 are
+    /// indexed for search, so `search` queries find nothing with this on.
+    pub fn skip_fulltext(self, skip: bool) -> Self {
+        self.set_flag(bindings::NDB_FLAG_NO_FULLTEXT, skip)
+    }
+
+    /// Don't store parsed content blocks (mentions, links, hashtags) for kinds
+    /// 1 and 30023 at ingest.
+    pub fn skip_note_blocks(self, skip: bool) -> Self {
+        self.set_flag(bindings::NDB_FLAG_NO_NOTE_BLOCKS, skip)
+    }
+
+    /// Don't count reactions and zaps into note metadata.
+    pub fn skip_stats(self, skip: bool) -> Self {
+        self.set_flag(bindings::NDB_FLAG_NO_STATS, skip)
+    }
+
+    /// Don't write the author-only `note_pubkey` index. A single-author query
+    /// without kinds still answers correctly, by scanning instead, and
+    /// author+kind queries still use their own index. Set it when the database
+    /// is created and leave it: turning it back off later leaves the index
+    /// missing every note written while it was on.
+    pub fn skip_pubkey_index(self, skip: bool) -> Self {
+        self.set_flag(bindings::NDB_FLAG_NO_PUBKEY_INDEX, skip)
+    }
+
     /// Set a callback to be notified on updated subscriptions. The function
     /// will be called with the corresponsing subscription id.
     ///
