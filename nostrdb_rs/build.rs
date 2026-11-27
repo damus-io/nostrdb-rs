@@ -60,6 +60,9 @@ fn bolt11_deps() -> &'static [&'static str] {
 }
 
 fn main() {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").expect("Cargo target OS");
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
     // Compile the C file
     let mut build = Build::new();
 
@@ -124,7 +127,7 @@ fn main() {
         build.include(include_root);
 
         // static libsodium on MSVC: avoid __imp_ dllimport mismatch
-        if cfg!(target_env = "msvc") {
+        if target_env == "msvc" {
             build.define("SODIUM_STATIC", Some("1"));
         }
 
@@ -138,7 +141,7 @@ fn main() {
 
     build.files(bolt11_deps());
 
-    if cfg!(target_os = "windows") {
+    if target_os == "windows" {
         println!("cargo:rustc-link-lib=bcrypt");
     } else {
         build
@@ -172,13 +175,12 @@ fn main() {
     // defines the symbol, otherwise the definition is never pulled in.
     println!("cargo:rustc-link-lib=static=nostrdb");
 
-    {
-        let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-        let is_windows = target_env == "msvc";
-        let sodium_name = if is_windows { "libsodium" } else { "sodium" };
-
-        println!("cargo:rustc-link-lib=static={sodium_name}");
-    }
+    let sodium_name = if target_env == "msvc" {
+        "libsodium"
+    } else {
+        "sodium"
+    };
+    println!("cargo:rustc-link-lib=static={sodium_name}");
 
     // Re-run the build script if any of the C files or headers change
     for file in &["nostrdb/src/nostrdb.c", "nostrdb/src/nostrdb.h"] {
@@ -191,8 +193,9 @@ fn main() {
     }
 
     // windows needs advapi32 due to a call in mdb_env_setup_locks
-    #[cfg(target_os = "windows")]
-    println!("cargo:rustc-link-lib=advapi32");
+    if target_os == "windows" {
+        println!("cargo:rustc-link-lib=advapi32");
+    }
 
     //
     // We only need bindgen when we update the bindings.
@@ -209,11 +212,11 @@ fn main() {
             .generate()
             .expect("Unable to generate bindings");
 
-        #[cfg(target_os = "windows")]
-        let filename = "src/bindings_win.rs";
-
-        #[cfg(not(target_os = "windows"))]
-        let filename = "src/bindings_posix.rs";
+        let filename = if target_os == "windows" {
+            "src/bindings_win.rs"
+        } else {
+            "src/bindings_posix.rs"
+        };
 
         bindings
             .write_to_file(filename)
