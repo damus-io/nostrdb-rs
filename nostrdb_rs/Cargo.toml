@@ -12,10 +12,10 @@ repository = "https://github.com/damus-io/nostrdb-rs/"
 
 [build-dependencies]
 cc = "1.0"
-bindgen = "0.69.1"
+bindgen = { version = "0.69.1", optional = true }
 
 [features]
-bindgen = []
+bindgen = ["dep:bindgen"]
 
 [dependencies]
 flatbuffers = "23.5.26"
